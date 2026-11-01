@@ -205,6 +205,31 @@ class CliTests(unittest.TestCase):
             self.assertIn("is_employee", text)
             self.assertIn("indicate_activity", text)
 
+    def test_xref(self):
+        from patcher.xref import main as xref
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            (root / "smali_classes2/com/ig/User.smali").write_text(
+                ".class public Lcom/ig/User;\n.super Ljava/lang/Object;\n\n"
+                ".method public show()V\n    .locals 1\n    new-instance v0, Lcom/ig/Dev;\n    return-void\n.end method\n"
+            )
+            out = Path(t) / "x.md"
+            self.assertEqual(xref([str(root), "--strings", "is_employee", "--out", str(out)]), 0)
+            text = out.read_text()
+            self.assertIn("class `Lcom/ig/Dev;`", text)
+            self.assertIn("Lcom/ig/User;->show()V", text)
+
+    def test_large_method_reported(self):
+        rule = Rule(id="r", description="r", action="true", return_types=("Z",), strings=("is_employee",), max_instructions=1)
+        from patcher.engine import Patch
+        patch = Patch("t", "t", [rule])
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            cands = find_candidates(root, {"t": patch.needles})["t"]
+            res = patch.apply(root, cands, Options())
+            self.assertEqual(res.patched, 0)
+            self.assertIn("too large", res.rules[0].skipped[0].reason)
+
     def test_requires_smali(self):
         with tempfile.TemporaryDirectory() as t:
             self.assertEqual(main([t]), 1)

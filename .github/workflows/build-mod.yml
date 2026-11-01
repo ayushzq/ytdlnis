@@ -118,6 +118,15 @@ jobs:
           python -m patcher.discover work/decoded --out work/report/discover.md
           cat work/report/discover.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Xref analysis (gates and seen-senders)
+        if: ${{ inputs.discover }}
+        run: |
+          mkdir -p work/report
+          python -m patcher.xref work/decoded --out work/report/xref_dev.md \
+            --strings "Dev Options,internal_settings,INTERNAL_SETTINGS_BUTTON,DEVELOPER_OPTIONS,is_employee"
+          python -m patcher.xref work/decoded --out work/report/xref_dm.md --max-lines 120 \
+            --strings "xig_direct_item_seen,mark_thread_seen-,direct_raven_mark_seen,send_thread_seen_marker"
+
       - name: Apply patches
         env:
           PATCHES: ${{ inputs.patches }}

@@ -77,13 +77,15 @@ class Rule:
     def check(self, f: SmaliFile, m: Method, allow_null: bool) -> tuple[str, str] | None:
         if not m.is_concrete or m.name in ("<init>", "<clinit>"):
             return None
-        if self.max_params is not None and count_params(m.params) > self.max_params:
-            return None
-        if self.max_instructions is not None and f.instruction_count(m) > self.max_instructions:
-            return None
         reason = self._reason(f, m)
         if reason is None:
             return None
+        if self.max_params is not None and count_params(m.params) > self.max_params:
+            return "skipped", f"{reason}; too many parameters (> {self.max_params})"
+        if self.max_instructions is not None:
+            size = f.instruction_count(m)
+            if size > self.max_instructions:
+                return "skipped", f"{reason}; too large ({size} instructions > {self.max_instructions})"
         if self.action == "rewrite":
             return "match", reason
         if self.return_types is not None and m.ret not in self.return_types:
