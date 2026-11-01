@@ -11,6 +11,7 @@ stock APK ──apktool d──▶ smali ──python patcher──▶ patched s
 |---|---|
 | `developer_options` | Forces the employee / internal gates to `true` so the internal **Developer Options / MobileConfig** menu becomes reachable. |
 | `ghost_mode` | Hides **story seen**, **DM seen** and the **typing indicator** (also available separately: `ghost_story_seen`, `ghost_dm_seen`, `ghost_typing`). |
+| `mod_menu` | Adds a small draggable **M** button on every screen. Tap it for toggles (story seen, DM seen, typing, ads), per-feature *"blocked N×"* counters (proof that a patch really fires), a list of what was patched in the build, and an **Open Developer Options** shortcut. |
 | `block_ads` | Neutralises ad-injection endpoints and ad-loading feature flags for sponsored content. |
 
 > **Read this first - patches are best-effort.** Instagram's code is obfuscated and changes every release.
@@ -38,6 +39,7 @@ stock APK ──apktool d──▶ smali ──python patcher──▶ patched s
    | `apk_path` | Used when `apk_url` is empty: repo path of a committed APK, e.g. `input/instagram.apk`. |
    | `patches` | `all` (default) or a comma list, e.g. `ghost_mode,block_ads`. |
    | `allow_null_returns` | Only affects `action="default"` stubs of object-returning methods (returns null). Leave OFF unless a report tells you to; ghost mode and ad blocking use safe string rewriting and don't need it. |
+   | `mod_menu` | ON by default. Compiles `ext/mod/*.java` into an extra `classesN.dex` and hooks it into Instagram. OFF = static patches only (no button, no toggles). |
    | `discover` | Adds a list of candidate anchor strings (seen / employee / dev-options) to the run summary. Handy when a new release breaks a rule. |
    | `strict` | Fail the run if a selected patch changed nothing. |
    | `create_release` | Publish the APK as a pre-release. Off by default - the APK contains Instagram's code, so don't publish it from a public repo. |
@@ -81,6 +83,8 @@ Requirements: Python 3.9+ (stdlib only), Java 17 + apktool + uber-apk-signer for
 patcher/smali.py                  smali parsing, stubs, parallel file index
 patcher/engine.py                 Rule / Patch engine
 patcher/patches/                  one module per patch (developer_options, ghost_mode, block_ads)
+patcher/fixzip.py                 restores stored zip entries, adds the extension dex
+ext/mod/*.java                    runtime half (hooks, floating button, menu)
 patcher/apk.py                    APK/bundle detection + sanity check
 patcher/cli.py                    `python -m patcher`
 tests/                            unit tests

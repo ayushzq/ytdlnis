@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="report matches without modifying files")
     ap.add_argument("--strict", action="store_true", help="exit 2 if any selected patch changed nothing")
     ap.add_argument("--allow-null-returns", action="store_true", help="also stub methods that return objects (returns null)")
+    ap.add_argument("--no-ext", action="store_true", help="static patches only: no mod menu / runtime toggles (skips mod_menu)")
     ap.add_argument("--max-matches", type=int, default=40, help="per-rule safety cap (default 40)")
     ap.add_argument("--report-dir", type=Path, help="write report.json and report.md here")
     ap.add_argument("--version", action="version", version=__version__)
@@ -78,7 +79,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc.args[0]}", file=sys.stderr)
         return 1
 
-    opts = Options(args.allow_null_returns, args.dry_run, args.max_matches)
+    if args.no_ext:
+        selected = [p for p in selected if p.name != "mod_menu"]
+    opts = Options(args.allow_null_returns, args.dry_run, args.max_matches, use_ext=not args.no_ext)
     print(f"Scanning smali for {len(selected)} patch(es)...")
     index = find_candidates(root, {p.name: p.needles for p in selected})
 

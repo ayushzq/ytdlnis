@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 from ..engine import Patch
-from . import block_ads, developer_options, ghost_mode
+from . import block_ads, developer_options, ghost_mode, mod_menu
 
 REGISTRY: dict[str, Patch] = {
     p.name: p
-    for p in [developer_options.PATCH, *ghost_mode.PATCHES, block_ads.PATCH]
+    for p in [mod_menu.PATCH, developer_options.PATCH, *ghost_mode.PATCHES, block_ads.PATCH]
 }
 
 # What "--patches all" runs (ghost_* sub-patches are already part of ghost_mode).
-DEFAULT: list[str] = ["developer_options", "ghost_mode", "block_ads"]
+DEFAULT: list[str] = ["mod_menu", "developer_options", "ghost_mode", "block_ads"]
 
 
 def resolve(spec: str) -> list[Patch]:

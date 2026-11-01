@@ -26,6 +26,11 @@ on:
         required: false
         default: false
         type: boolean
+      mod_menu:
+        description: "Add the in-app Mod menu (floating M button: toggles, counters, Developer Options shortcut)"
+        required: false
+        default: true
+        type: boolean
       discover:
         description: "Also list candidate anchor strings (seen / employee / dev options) in the run summary"
         required: false
@@ -125,6 +130,8 @@ jobs:
           python -m patcher.xref work/decoded --out work/report/xref_dev.md --max-classes 12 --per-string 1 \
             --names "com/instagram/(debug|devoptions)|[Ee]mployee|InternalSettings|Dogfood" \
             --strings "Dev Options,com.instagram.debug.devoptions.sandboxselector.SandboxOverlayView,DEVELOPER_OPTIONS,INTERNAL_SETTINGS_BUTTON,is_employee"
+          python -m patcher.xref work/decoded --out work/report/xref_ads.md --max-classes 8 --per-string 1 \
+            --strings "sponsored_item_meets_min_gap_current_position_less_than_zero maxSeenPosition: ,media_or_ad,ad_id,is_sponsored,sponsored_post,ads_info,injected_ad"
           python -m patcher.xref work/decoded --out work/report/xref_dm.md --max-lines 120 \
             --strings "xig_direct_item_seen,mark_thread_seen-,direct_raven_mark_seen,send_thread_seen_marker"
 
@@ -133,9 +140,11 @@ jobs:
           PATCHES: ${{ inputs.patches }}
           ALLOW_NULL: ${{ inputs.allow_null_returns }}
           STRICT: ${{ inputs.strict }}
+          MOD_MENU: ${{ inputs.mod_menu }}
         run: |
           set -euo pipefail
           ARGS=(--patches "${PATCHES:-all}" --report-dir work/report)
+          if [ "$MOD_MENU" != "true" ]; then ARGS+=(--no-ext); fi
           if [ "$ALLOW_NULL" = "true" ]; then ARGS+=(--allow-null-returns); fi
           if [ "$STRICT" = "true" ]; then ARGS+=(--strict); fi
           python -m patcher work/decoded "${ARGS[@]}"
@@ -148,10 +157,34 @@ jobs:
       - name: Rebuild with apktool
         run: java -Xmx6g -jar tools/apktool.jar b work/decoded -o work/unsigned.apk
 
-      - name: Restore zip compression (install-critical entries)
+      - name: Build mod-menu extension dex
+        if: ${{ inputs.mod_menu }}
         run: |
           set -euo pipefail
-          python -m patcher.fixzip work/stock.apk work/unsigned.apk work/fixed.apk
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BT=$(ls -d "$SDK"/build-tools/*/ | sort -V | tail -n1)
+          PLAT=""
+          for d in $(ls -d "$SDK"/platforms/android-*/ | sort -V -r); do
+            if [ -f "${d}android.jar" ]; then PLAT="$d"; break; fi
+          done
+          test -n "$PLAT" || { echo "::error::No android.jar found in the Android SDK"; exit 1; }
+          echo "build-tools: $BT  platform: $PLAT"
+          rm -rf work/ext work/extclasses work/extdex
+          cp -r ext work/ext
+          python -m patcher.mkinfo work/report/report.json work/ext/mod/BuildInfo.java --version "build-${GITHUB_RUN_NUMBER}"
+          mkdir -p work/extclasses work/extdex
+          javac -Xlint:-options -source 8 -target 8 -bootclasspath "${PLAT}android.jar" -d work/extclasses $(find work/ext -name '*.java')
+          "${BT}d8" --release --min-api 28 --lib "${PLAT}android.jar" --output work/extdex $(find work/extclasses -name '*.class')
+          ls -l work/extdex
+
+      - name: Restore zip compression (install-critical entries)
+        env:
+          MOD_MENU: ${{ inputs.mod_menu }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ "$MOD_MENU" = "true" ]; then EXTRA=(--add-dex work/extdex/classes.dex); fi
+          python -m patcher.fixzip "${EXTRA[@]}" work/stock.apk work/unsigned.apk work/fixed.apk
 
       - name: Align and sign
         env:
@@ -190,6 +223,7 @@ jobs:
             "${BT}apksigner" verify --verbose --print-certs "$APK" 2>&1 | head -n 20 || true
             "${BT}zipalign" -c -P 16 4 "$APK" && echo "zipalign(16K): OK" || echo "zipalign(16K): NOT aligned"
             python -m patcher.fixzip --check work/stock.apk "$APK" || true
+            echo "dex files:"; unzip -l "$APK" | awk '{print $4}' | grep -E "^classes[0-9]*\.dex$" | sort -V | tail -n 3
             "${BT}aapt2" dump badging "$APK" 2>/dev/null | grep -E "^(package|sdkVersion|targetSdkVersion|minSdkVersion|native-code|application-label:)" | head -n 12 || true
             "${BT}aapt2" dump xmltree --file AndroidManifest.xml "$APK" 2>/dev/null | grep -iE "extractNativeLibs|isSplitRequired|splits.required|sharedUserId|installLocation" | head -n 8 || true
             echo '```'

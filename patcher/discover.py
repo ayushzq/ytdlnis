@@ -17,11 +17,12 @@ GROUPS: dict[str, str] = {
     "employee_dev": r"is_?(?:ig_)?employee|is_?internal|internal_?(?:settings|user|build)|dev(?:eloper)?_?options|mobile_?config_?(?:override|debug)|qe_?sandbox",
     "typing": r"indicate_activity|typing_?indicator|activity_?indicator",
     "dm_seen": r"(?:direct|thread|item).*(?:seen|read_receipt|mark_read)|(?:seen|read_receipt).*(?:thread|item|direct)|mark_(?:thread|visual|item)\w*",
+    "ads": r"^(?:ad_id|is_ad\w*|is_sponsored\w*|sponsored\w*|media_or_ad|ad_?(?:action|metadata|info|pool)\w*|ads_?(?:info|pool)\w*)$",
     "story_seen": r"(?:media|reel|story|stories)\w*/?\w*seen|seen\w*(?:reel|story)",
 }
 # UI/NUX bookkeeping that is never an endpoint
 NOISE = re.compile(r"nux|upsell|last_?seen|seen_?count|timestamp|tooltip|banner|dialog|badge|preference_|\.kt:|SeenIndicator|Unseen", re.I)
-NOISE_EXEMPT = {"employee_dev", "typing"}
+NOISE_EXEMPT = {"employee_dev", "typing", "ads"}
 
 
 def scan(root: Path, groups: dict[str, str], limit: int) -> dict[str, list[str]]:

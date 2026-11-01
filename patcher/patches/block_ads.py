@@ -13,12 +13,14 @@ PATCH = Patch(
     rules=[
         Rule(
             id="ad_endpoints",
+            feature="ads",
             description="Redirect ad-delivery endpoints (story ad injection, ads GraphQL) to a dead path",
             action="rewrite",
             strings=("feed/injected_reels_media/", "ads/graphql/"),
         ),
         Rule(
             id="ad_feature_flags",
+            feature="ads",
             description="Boolean helpers reading ig_android_*ad* MobileConfig flags",
             action="false",
             return_types=("Z",),

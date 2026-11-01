@@ -31,6 +31,9 @@ class Rule:
       "rewrite" - keep the method, but prefix the matching string constants with
                   "ghost_blocked/" so requests hit a dead path (404) instead of the real
                   endpoint. Safe for any return type; nothing is nulled.
+
+    feature: when set (and the extension dex is used), the patch is wrapped in a call to
+    Lmod/Hooks so the in-app mod menu can switch it on/off and count how often it fired.
     """
 
     id: str
@@ -45,6 +48,7 @@ class Rule:
     max_params: int | None = None
     inject: tuple[str, ...] = ()   # smali lines (no indent) inserted at method start
     require: tuple[str, ...] = ()  # substrings that must ALL appear in the method body (version pin)
+    feature: str = ""  # runtime toggle in the mod menu: story | dm | typing | ads ("" = always on)
 
     def __post_init__(self) -> None:
         if self.action not in ACTIONS:
@@ -70,10 +74,13 @@ class Rule:
         return bool(self.string_regex and re.search(self.string_regex, s))
 
     def _reason(self, f: SmaliFile, m: Method) -> str | None:
+        if self.action == "rewrite":
+            for s, wrapped in f.hooked_strings(m):
+                if self.string_matches(s) and not wrapped and not s.startswith(REWRITE_PREFIX):
+                    return f'string "{s[:80]}"'
+            return None
         for s in f.strings(m):
             if self.string_matches(s):
-                if self.action == "rewrite" and s.startswith(REWRITE_PREFIX):
-                    continue  # already patched
                 return f'string "{s[:80]}"'
         if self.field_regex:
             for ref in f.field_refs(m):
@@ -82,14 +89,14 @@ class Rule:
         return None
 
     @property
-    def marker(self) -> str:
-        return f"# ghost-inject:{self.id}"
+    def markers(self) -> tuple[str, str]:
+        return f"# ghost-inject:{self.id}", f"# ghost-guard:{self.id}"
 
-    def check(self, f: SmaliFile, m: Method, allow_null: bool) -> tuple[str, str] | None:
+    def check(self, f: SmaliFile, m: Method, allow_null: bool, use_ext: bool = True) -> tuple[str, str] | None:
         if not m.is_concrete or m.name in ("<init>", "<clinit>"):
             return None
-        if self.action == "inject" and any(self.marker in line for line in f.body(m)):
-            return None  # already injected
+        if self.action != "rewrite" and any(mk in line for line in f.body(m) for mk in self.markers):
+            return None  # already patched
         reason = self._reason(f, m)
         if reason is None:
             return None
@@ -101,6 +108,8 @@ class Rule:
                 return "skipped", f"{reason}; too large ({size} instructions > {self.max_instructions})"
         if self.action == "rewrite":
             return "match", reason
+        if self.feature and use_ext and not f.has_locals(m):
+            return "skipped", f"{reason}; method has no .locals line (cannot add a guard)"
         if self.return_types is not None and m.ret not in self.return_types:
             return "skipped", f"{reason}; return type {m.ret} not allowed by rule"
         if self.action == "inject":
@@ -119,6 +128,7 @@ class Options:
     allow_null_returns: bool = False
     dry_run: bool = False
     max_matches: int = 40
+    use_ext: bool = True  # wrap feature rules in Lmod/Hooks calls (needs the extension dex)
 
 
 @dataclass
@@ -168,7 +178,7 @@ class Patch:
                 if not any(n in f.text for n in rule.needles):
                     continue
                 for m in f.methods():
-                    verdict = rule.check(f, m, opts.allow_null_returns)
+                    verdict = rule.check(f, m, opts.allow_null_returns, opts.use_ext)
                     if verdict is None:
                         continue
                     kind, reason = verdict
@@ -190,12 +200,21 @@ class Patch:
                     by_file.setdefault(f.path, (f, []))[1].append(m)
                 for f, methods in by_file.values():
                     for m in sorted(methods, key=lambda x: x.start, reverse=True):
+                        hooked = bool(rule.feature) and opts.use_ext
                         if rule.action == "rewrite":
-                            f.rewrite_strings(m, rule.string_matches, REWRITE_PREFIX)
+                            f.rewrite_strings(m, rule.string_matches, REWRITE_PREFIX, rule.feature if hooked else "")
                         elif rule.action == "inject":
-                            f.inject_at_start(m, ["    " + rule.marker, *("    " + x for x in rule.inject)])
+                            if hooked:
+                                f.guarded_insert(m, rule.feature, rule.id, list(rule.inject))
+                            else:
+                                f.inject_at_start(m, ["    " + rule.markers[0], *("    " + x for x in rule.inject)])
                         else:
-                            f.replace_body(m, make_stub(m.ret, boolean=rule.action == "true"))
+                            stub = make_stub(m.ret, boolean=rule.action == "true")
+                            if hooked:
+                                lines = [x.strip() for x in stub if x.strip() and not x.strip().startswith(".locals")]
+                                f.guarded_insert(m, rule.feature, rule.id, lines)
+                            else:
+                                f.replace_body(m, stub)
                     f.save()
                 status = "applied"
             results.append(RuleResult(rule.id, rule.description, status, hits, skipped))

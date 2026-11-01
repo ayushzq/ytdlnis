@@ -14,6 +14,7 @@ STORY_SEEN = Patch(
     rules=[
         Rule(
             id="story_seen_endpoint",
+            feature="story",
             description="Redirect the story/reel 'media seen' endpoints to a dead path",
             action="rewrite",
             strings=("media/seen/", "media/%s/seen/", "reels_media_seen", "mark_stories_seen"),
@@ -27,6 +28,7 @@ DM_SEEN = Patch(
     rules=[
         Rule(
             id="dm_seen_endpoint",
+            feature="dm",
             description="Redirect DM / visual-message 'seen' endpoints to a dead path",
             action="rewrite",
             strings=(
@@ -39,6 +41,7 @@ DM_SEEN = Patch(
         ),
         Rule(
             id="dm_mark_thread_seen_stub",
+            feature="dm",
             description="Void method that enqueues the 'mark thread seen' task -> no-op",
             action="default",
             return_types=("V",),
@@ -47,6 +50,7 @@ DM_SEEN = Patch(
         ),
         Rule(
             id="dm_item_seen_mutation_abort",
+            feature="dm",
             description="IGDirectItemSeenMutation executor: take the method's own error exit before sending (pinned to v455 code)",
             action="inject",
             return_types=("V",),
@@ -81,6 +85,7 @@ TYPING = Patch(
     rules=[
         Rule(
             id="typing_send_stub",
+            feature="typing",
             description="Void/boolean methods that send the typing indicator -> no-op",
             action="default",
             return_types=("V", "Z"),
@@ -89,6 +94,7 @@ TYPING = Patch(
         ),
         Rule(
             id="typing_endpoint_rewrite",
+            feature="typing",
             description="Any other user of the typing endpoint -> dead path",
             action="rewrite",
             string_regex=_TYPING_RE,

@@ -9,11 +9,12 @@ extractNativeLibs=false, native .so files) are compressed. We copy the original'
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import zipfile
 
 
-def restore(stock: str, built: str, out: str) -> dict[str, int]:
+def restore(stock: str, built: str, out: str, extra_dex: str | None = None) -> dict[str, int]:
     with zipfile.ZipFile(stock) as z:
         stored = {i.filename for i in z.infolist() if i.compress_type == zipfile.ZIP_STORED}
     changed = 0
@@ -30,7 +31,15 @@ def restore(stock: str, built: str, out: str) -> dict[str, int]:
                 changed += 1
             new.compress_type = want
             zout.writestr(new, data)
-    return {"entries": len(zin.infolist()), "restored_to_stored": changed}
+        added = ""
+        if extra_dex:
+            nums = [int(m.group(1) or 1) for i in zin.infolist() if (m := re.fullmatch(r"classes(\d*)\.dex", i.filename))]
+            added = f"classes{max(nums, default=1) + 1}.dex"
+            info = zipfile.ZipInfo(added, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(extra_dex, "rb") as fh:
+                zout.writestr(info, fh.read())
+    return {"entries": len(zin.infolist()), "restored_to_stored": changed, "added_dex": added}
 
 
 def report(stock: str, apk: str) -> int:
@@ -55,13 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("stock")
     ap.add_argument("built")
     ap.add_argument("out", nargs="?")
+    ap.add_argument("--add-dex", help="extra dex to add as the next classesN.dex")
     ap.add_argument("--check", action="store_true", help="only report on BUILT against STOCK")
     args = ap.parse_args(argv)
     if args.check:
         return report(args.stock, args.built)
     if not args.out:
         ap.error("OUT required")
-    print(restore(args.stock, args.built, args.out))
+    print(restore(args.stock, args.built, args.out, args.add_dex))
     return 0
 
 

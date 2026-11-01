@@ -10,8 +10,10 @@ from typing import Iterable, Iterator
 
 _SIG = re.compile(r"^(?P<name>.+?)\((?P<params>[^)]*)\)(?P<ret>.+)$")
 _CONST_STRING = re.compile(
-    r'^(?P<head>\s*const-string(?:/jumbo)?\s+[vp]\d+,\s*)"(?P<s>.*)"\s*$'
+    r'^(?P<head>\s*const-string(?:/jumbo)?\s+(?P<reg>[vp]\d+),\s*)"(?P<s>.*)"\s*$'
 )
+_LOCALS = re.compile(r"^\s*\.locals\s+(?P<n>\d+)\s*$")
+HOOKS = "Lmod/Hooks;"
 _FIELD_REF = re.compile(
     r"^\s*[is]get[\w-]*\s+[vp]\d+,\s*(?:[vp]\d+,\s*)?(?P<ref>L\S+->\S+)\s*$"
 )
@@ -93,15 +95,63 @@ class SmaliFile:
             if hit:
                 yield hit["s"]
 
-    def rewrite_strings(self, m: Method, should_rewrite, prefix: str) -> int:
-        """Prefix every matching const-string in the method; returns how many changed."""
+    def hooked_strings(self, m: Method) -> Iterator[tuple[str, bool]]:
+        """Yields (string, already_wrapped_by_hook) for each const-string in the method."""
+        body = self.body(m)
+        for i, line in enumerate(body):
+            hit = _CONST_STRING.match(line)
+            if hit:
+                nxt = body[i + 1] if i + 1 < len(body) else ""
+                yield hit["s"], HOOKS in nxt
+
+    def rewrite_strings(self, m: Method, should_rewrite, prefix: str, feature: str = "") -> int:
+        """Rewrite matching const-strings. Static: prefix the literal. With `feature`: wrap the
+        register through Lmod/Hooks;->feature(String)String so the app can toggle it at runtime."""
         changed = 0
-        for i in range(m.start + 1, m.end):
+        for i in range(m.end - 1, m.start, -1):  # backwards: insertions don't shift pending indices
             hit = _CONST_STRING.match(self.lines[i])
-            if hit and not hit["s"].startswith(prefix) and should_rewrite(hit["s"]):
+            if not hit or not should_rewrite(hit["s"]):
+                continue
+            if feature:
+                if HOOKS in self.lines[i + 1]:
+                    continue
+                reg = hit["reg"]
+                self.lines[i + 1 : i + 1] = [
+                    f"    invoke-static/range {{{reg} .. {reg}}}, {HOOKS}->{feature}(Ljava/lang/String;)Ljava/lang/String;",
+                    f"    move-result-object {reg}",
+                ]
+                changed += 1
+            elif not hit["s"].startswith(prefix):
                 self.lines[i] = f'{hit["head"]}"{prefix}{hit["s"]}"'
                 changed += 1
         return changed
+
+    def has_locals(self, m: Method) -> bool:
+        return any(_LOCALS.match(line) for line in self.body(m))
+
+    def ensure_locals(self, m: Method, minimum: int) -> None:
+        for i in range(m.start + 1, m.end):
+            hit = _LOCALS.match(self.lines[i])
+            if hit:
+                if int(hit["n"]) < minimum:
+                    self.lines[i] = f"    .locals {minimum}"
+                return
+
+    def guarded_insert(self, m: Method, feature: str, rule_id: str, lines: list[str]) -> None:
+        """Run `lines` at method start only while Lmod/Hooks;->feature()Z is true (v0 is scratch)."""
+        label = f":ghost_go_{rule_id}"
+        self.ensure_locals(m, 1)
+        self.inject_at_start(
+            m,
+            [
+                f"    # ghost-guard:{rule_id}",
+                f"    invoke-static {{}}, {HOOKS}->{feature}()Z",
+                "    move-result v0",
+                f"    if-eqz v0, {label}",
+                *(f"    {x}" for x in lines),
+                f"    {label}",
+            ],
+        )
 
     def inject_at_start(self, m: Method, lines: list[str]) -> None:
         """Insert lines before the method's first real instruction (after .locals/.param/annotations)."""

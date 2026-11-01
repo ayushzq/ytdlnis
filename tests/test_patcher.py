@@ -102,6 +102,7 @@ class SmaliTests(unittest.TestCase):
 
 class PatchTests(unittest.TestCase):
     def run_patch(self, name, **kw):
+        kw.setdefault("use_ext", False)
         with tempfile.TemporaryDirectory() as t:
             root = make_tree(Path(t))
             patch = REGISTRY[name]
@@ -141,24 +142,103 @@ class PatchTests(unittest.TestCase):
             net = root / "smali_classes2/com/ig/Net.smali"
             patch = REGISTRY["ghost_dm_seen"]
             cands = find_candidates(root, {"p": patch.needles})["p"]
-            patch.apply(root, cands, Options())
+            patch.apply(root, cands, Options(use_ext=False))
             once = net.read_text()
-            patch.apply(root, cands, Options())
+            patch.apply(root, cands, Options(use_ext=False))
             self.assertEqual(once.count("ghost-inject:dm_item_seen_mutation_abort"), 1)
             # a different release (pin anchor missing) must be skipped, not patched
             net.write_text(once.replace("ghost-inject", "x").replace("LX/0AEJ;->A00", "LX/0ZZZ;->A00")
                            .replace("    sget-object v0, LX/0FXy;->A0U:LX/0FXy;\n    const/4 v1, 0x0\n    move-object/from16 v2, p2\n", ""))
-            res = patch.apply(root, cands, Options())
+            res = patch.apply(root, cands, Options(use_ext=False))
             skipped = [h.reason for r in res.rules for h in r.skipped]
             self.assertTrue(any("version pin failed" in x for x in skipped))
+
+    def test_hooked_mode_wraps_instead_of_replacing(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            net = root / "smali_classes2/com/ig/Net.smali"
+            patch = REGISTRY["ghost_mode"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            patch.apply(root, cands, Options())  # use_ext defaults to True
+            text = net.read_text()
+            # string endpoints: const-string stays, wrapped by the runtime hook through the same register
+            self.assertIn('const-string v0, "media/seen/"\n    invoke-static/range {v0 .. v0}, Lmod/Hooks;->story(Ljava/lang/String;)Ljava/lang/String;\n    move-result-object v0', text)
+            self.assertIn("Lmod/Hooks;->dm(Ljava/lang/String;)Ljava/lang/String;", text)
+            # stubbed methods keep their code behind a guard on the feature flag
+            self.assertIn("invoke-static {}, Lmod/Hooks;->typing()Z", text)
+            self.assertIn("if-eqz v0, :ghost_go_typing_send_stub", text)
+            self.assertIn(":ghost_go_typing_send_stub", text)
+            self.assertIn('const-string v0, "direct_v2/threads/%s/indicate_activity/"', text)  # original body kept
+            # mutation executor: early exit guarded by dm flag; .locals raised only when needed
+            self.assertIn("invoke-static {}, Lmod/Hooks;->dm()Z", text)
+            # idempotent
+            patch.apply(root, cands, Options())
+            self.assertEqual(net.read_text(), text)
+
+    def test_guard_bumps_locals_zero(self):
+        f = SmaliFile(Path("x.smali"), ".class public Lx/A;\n.super Ljava/lang/Object;\n\n"
+                      ".method public static a(Ljava/lang/String;)V\n    .locals 0\n    return-void\n.end method\n")
+        m = f.methods()[0]
+        f.guarded_insert(m, "typing", "r1", ["return-void"])
+        text = "\n".join(f.lines)
+        self.assertIn(".locals 1", text)
+        self.assertLess(text.index("ghost-guard:r1"), text.index("return-void\n    :ghost_go_r1"))
+
+    def test_mod_menu_hook_added_and_injected(self):
+        from patcher.patches import mod_menu
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / "decoded"
+            d = root / "smali_classes3/com/instagram/base/activity"
+            d.mkdir(parents=True)
+            target = d / "IgFragmentActivity.smali"
+            target.write_text(".class public Lcom/instagram/base/activity/IgFragmentActivity;\n"
+                              ".super Landroidx/fragment/app/FragmentActivity;\n")
+            res = mod_menu.PATCH.apply(root, [], Options())
+            self.assertEqual(res.patched, 1)
+            text = target.read_text()
+            self.assertIn("invoke-super {p0}, Landroidx/fragment/app/FragmentActivity;->onResume()V", text)
+            self.assertIn("Lmod/Hooks;->onResume(Landroid/app/Activity;)V", text)
+            mod_menu.PATCH.apply(root, [], Options())  # idempotent
+            self.assertEqual(target.read_text().count("ghost-hook:onResume"), 1)
+            # existing onResume gets the call injected at its start
+            target.write_text(".class public Lcom/instagram/base/activity/IgFragmentActivity;\n.super Ljava/lang/Object;\n\n"
+                              ".method protected onResume()V\n    .locals 1\n    const/4 v0, 0x0\n    return-void\n.end method\n")
+            mod_menu.PATCH.apply(root, [], Options())
+            body = target.read_text().split(".locals 1", 1)[1]
+            self.assertLess(body.index("Lmod/Hooks;"), body.index("const/4 v0"))
+
+    def test_mkinfo(self):
+        from patcher.mkinfo import build
+        report = [{"name": "ghost_mode", "rules": [
+            {"rule_id": "story_seen_endpoint", "status": "applied", "hits": [{}]},
+            {"rule_id": "dm_seen_endpoint", "status": "applied", "hits": [{}, {}, {}]},
+            {"rule_id": "typing_send_stub", "status": "no-match", "hits": []}]}]
+        java = build(report, "t1")
+        self.assertIn("HOOKS = {1, 3, 0, 0}", java)
+        self.assertIn("ghost_mode/story_seen_endpoint: applied (1)", java)
+
+    def test_fixzip_adds_next_dex(self):
+        import zipfile
+        from patcher.fixzip import restore
+        with tempfile.TemporaryDirectory() as t:
+            stock, built, out, dex = (str(Path(t) / n) for n in ("s.apk", "b.apk", "o.apk", "x.dex"))
+            Path(dex).write_bytes(b"dex\n035\x00")
+            for p in (stock, built):
+                with zipfile.ZipFile(p, "w") as z:
+                    z.writestr("classes.dex", b"1")
+                    z.writestr("classes2.dex", b"2")
+                    z.writestr("classes10.dex", b"3")
+            self.assertEqual(restore(stock, built, out, dex)["added_dex"], "classes11.dex")
+            with zipfile.ZipFile(out) as z:
+                self.assertIn("classes11.dex", z.namelist())
 
     def test_rewrite_is_idempotent(self):
         with tempfile.TemporaryDirectory() as t:
             root = make_tree(Path(t))
             patch = REGISTRY["ghost_story_seen"]
             cands = find_candidates(root, {"p": patch.needles})["p"]
-            patch.apply(root, cands, Options())
-            res = patch.apply(root, cands, Options())
+            patch.apply(root, cands, Options(use_ext=False))
+            res = patch.apply(root, cands, Options(use_ext=False))
             self.assertEqual(res.patched, 0)
             self.assertNotIn("ghost_blocked/ghost_blocked/", (root / "smali_classes2/com/ig/Net.smali").read_text())
 
@@ -172,7 +252,7 @@ class PatchTests(unittest.TestCase):
             )
             patch = REGISTRY["ghost_typing"]
             cands = find_candidates(root, {"p": patch.needles})["p"]
-            res = patch.apply(root, cands, Options())
+            res = patch.apply(root, cands, Options(use_ext=False))
             self.assertIn("indicate_activity: in addOrReplace", (root / "smali_classes2/com/ig/Rt.smali").read_text())
             self.assertEqual(res.patched, 1)  # only the sender in Net.smali
 
@@ -208,7 +288,7 @@ class PatchTests(unittest.TestCase):
             Rule(id="x", description="x", action="rewrite", field_regex="a", prefilter=("a",))
 
     def test_resolve(self):
-        self.assertEqual([p.name for p in resolve("all")], ["developer_options", "ghost_mode", "block_ads"])
+        self.assertEqual([p.name for p in resolve("all")], ["mod_menu", "developer_options", "ghost_mode", "block_ads"])
         with self.assertRaises(KeyError):
             resolve("nope")
 
