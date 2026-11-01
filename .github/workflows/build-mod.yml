@@ -132,6 +132,9 @@ jobs:
             --strings "Dev Options,com.instagram.debug.devoptions.sandboxselector.SandboxOverlayView,DEVELOPER_OPTIONS,INTERNAL_SETTINGS_BUTTON,is_employee"
           python -m patcher.xref work/decoded --out work/report/xref_ads.md --max-classes 8 --per-string 1 \
             --strings "sponsored_item_meets_min_gap_current_position_less_than_zero maxSeenPosition: ,media_or_ad,ad_id,is_sponsored,sponsored_post,ads_info,injected_ad"
+          python -m patcher.xref work/decoded --out work/report/xref_download.md --max-classes 8 --per-string 1 --max-lines 60 \
+            --names "exoplayer|media3|DataSpec|VideoPlayer|ClipsViewer|MediaOptions|ShareSheet|DownloadManager" \
+            --strings "video_versions,image_versions2,carousel_media,progressive_download_url,play_url,video_url"
           python -m patcher.xref work/decoded --out work/report/xref_dm.md --max-lines 120 \
             --strings "xig_direct_item_seen,mark_thread_seen-,direct_raven_mark_seen,send_thread_seen_marker"
 
