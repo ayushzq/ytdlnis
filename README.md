@@ -1,201 +1,91 @@
-<h1 align="center">
-	<img src="fastlane/metadata/android/en-US/images/icon.png" width="25%" /> <br>
-	YTDLnis
-</h1>
+# Instagram Mod Patcher
 
-<div align="center">
-	English
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-sq.md">Shqip</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-az.md">Azərbaycanca</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-tr.md">Türkçe</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-id.md">Indonesia</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-pt.md">Português</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-es.md">Español</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-ja.md">Japanese</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-zh_CN.md">简体中文</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-ro.md">Română</a>
-	&nbsp;&nbsp;| &nbsp;&nbsp;
-	<a href="https://github.com/deniscerri/ytdlnis/blob/main/README-ar.md">العربية</a>
-</div>
+Automated, GitHub-Actions-driven patcher that turns a **stock Instagram APK you supply** into a modded build.
+No Instagram code is stored in this repository; the pipeline is:
 
-<h3 align="center">
-	YTDLnis is a free and open source video/audio downloader using yt-dlp for Android 7.0 and above.
-</h3>
-<h4 align="center">
-	Created by Denis Çerri
-</h4>
-
-<div align="center">
-
-[![GitHub Releases](https://custom-icon-badges.herokuapp.com/badge/Download-blue?style=for-the-badge&logo=download&logoColor=white)](https://github.com/deniscerri/ytdlnis/releases/latest)
-[![F-Droid](https://custom-icon-badges.herokuapp.com/badge/FDroid-violet?style=for-the-badge&logo=download&logoColor=white)](https://f-droid.org/en/packages/com.deniscerri.ytdl)
-[![IzzyOnDroid repository](https://custom-icon-badges.herokuapp.com/badge/IzzyOnDroid%20Repo-red?style=for-the-badge&logo=download&logoColor=white)](https://apt.izzysoft.de/packages/com.deniscerri.ytdl)
-[![Uptodown](https://custom-icon-badges.herokuapp.com/badge/UpToDown-green?style=for-the-badge&logo=download&logoColor=white)](https://ytdlnis.en.uptodown.com/android/download)
-
-![CI](https://github.com/deniscerri/ytdlnis/actions/workflows/android.yml/badge.svg?branch=main&event=pull)
-[![Preview release](https://img.shields.io/github/release/deniscerri/ytdlnis.svg?maxAge=3600&include_prereleases&label=preview)](https://github.com/deniscerri/ytdlnis/releases) 
-[![Downloads](https://img.shields.io/github/downloads/deniscerri/ytdlnis/total?style=flat-square)](https://github.com/deniscerri/ytdlnis/releases) 
-[![Translation status](https://hosted.weblate.org/widgets/ytdlnis/-/svg-badge.svg)](https://hosted.weblate.org/engage/ytdlnis/?utm_source=widget) 
-[![community](https://img.shields.io/badge/Discord-YTDLnis-blueviolet?style=flat-square&logo=discord)](https://discord.gg/WW3KYWxAPm) 
-[![community](https://img.shields.io/badge/Telegram-YTDLnis-blue?style=flat-square&logo=telegram)](https://t.me/ytdlnis)
-[![community](https://img.shields.io/badge/Telegram-Updates-red?style=flat-square&logo=telegram)](https://t.me/ytdlnis_updates)
-[![website](https://img.shields.io/badge/Website-orange?style=flat-square&logo=youtube)](https://ytdlnis.org)
-![GitHub Sponsor](https://img.shields.io/github/sponsors/deniscerri?label=Sponsor&logo=GitHub)
-
-### Only the links above are the only trusted sources of YTDLnis. Everything else is not related to me.
-
-</div>
-
-## 💡 Features:
-
-- Download audio/video files from more than <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md">1000 websites</a>
-- Process playlists
-	- Edit every playlist item separately just like in a normal download item
-	- Select a common format for all items and/or select multiple audio formats in case you are downloading them as a video
-	- Select a download path for all items
-	- Select a filename template for all items
-	- Batch update download type to audio/video/custom command in one click
-- Queue downloads and schedule them by date and time
-	- You can also schedule multiple items at the same time
-- Download multiple items at the same time
-- Use custom commands and templates or use yt-dlp with the built-in terminal
-	- You can backup and restore templates so you can share them with your buddies
-- Supports cookies. Log in with your accounts and download private/unavailable videos, unlock premium formats etc.
-- Cut videos based on timestamps and video chapters (experimental yt-dlp feature)
-	- You can make unlimited cuts
-- Remove SponsorBlock elements from downloaded items
-	- Embed them as a chapters in your video 
-- Embed subtitles/metadata/chapters etc
-- Modify metadata such as title and author
-- Split item into separate files depending on its chapters
-- Select different download formats
-- Bottom card right from the share menu, no need to open the app 
-	- You can create a txt file and fill it with links/playlists/search queries separate by a new line and the app will process them
-- Search or insert a link from the app
-	- You can stack searches so you can process them at the same time
-- Log downloads in case of problems
-- Re-download cancelled or failed downloads
-	- You can use gestures to swipe left to redownload and right to delete
-	- You can long click the redownload button in the details sheet to show the download card for more functionality
-- Incognito mode when you don't want to save a download history or logs
-- Quick download mode
-	- Download immediately without having to wait for data to process. Turn off the bottom card and it will instantly start
-- Open / share downloaded files right from the finished notification
-- Most yt-dlp features are implemented, suggestions are welcome
-- Material You interface
-- Theming options
-- Backup and restore features
-- MVVM architecture with WorkManager
-
-## 🧩 Plugin Support
-
-YTDLnis orchestrates plugins so users can freely upgrade and downgrade components such as:
-- Python
-- JS Runtimes (NodeJS, Deno)
-- FFmpeg
-- Aria2c
-
-You can install ytdlnis packages from this repository [ytdlnis-packages](https://github.com/deniscerri/ytdlnis-packages/) or through the updating section in the application.
-<br>For more information refer to the repo's README.
-
-## 📲 Screenshots
-
-<div>
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/04.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/05.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/06.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/07.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/08.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/09.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/10.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/11.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/12.png" width="30%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/13.png" width="90%" />
-</div>
-
-## 💬 Contact
-
-Join our [Discord](https://discord.gg/WW3KYWxAPm) or [Telegram channel](https://t.me/ytdlnis) for announcements, discussion and releases.
-
-## 😇 Contributing
-
-Please read the [contributing](CONTRIBUTING.MD) section if you would like to contribute.
-
-## 📝 Help translate on Weblate
-<a href="https://hosted.weblate.org/engage/ytdlnis/">
-<img src="https://hosted.weblate.org/widgets/ytdlnis/-/strings/open-graph.png" alt="Translation status" />
-</a>
-
-
-<a href="https://hosted.weblate.org/engage/ytdlnis/">
-<img src="https://hosted.weblate.org/widgets/ytdlnis/-/multi-auto.svg" alt="Translation status" />
-</a>
-
-## 🔑 Connect with third-party apps using the package name
-
-The app's package name is "com.deniscerri.ytdl".
-
-## 🔍 Verify application signature
-
-The app should contain the signature below. The github workflow action uses it, and the releases are based on it to make it a reproducible build.
-If the signature is different, your third party distributor has modified the application. Please use the app with the original signature.
 ```
-Signer #1 certificate DN: CN=Denis Cerri, OU=Personal, O=Personal, L=Albania, ST=Albania, C=AL
-Signer #1 certificate SHA-256 digest: 263645cb5272eb290759fe1f59149ae24df6ce171e9f6666eead981d3fc64c95
-Signer #1 certificate SHA-1 digest: 2fec9c2fcef68d29a60857e185c795fec5f56fb6
-Signer #1 certificate MD5 digest: 429d0c6315d2f99650f66cc44cf5a794
+stock APK ──apktool d──▶ smali ──python patcher──▶ patched smali ──apktool b──▶ uber-apk-signer ──▶ signed APK
 ```
 
+| Patch | What it does |
+|---|---|
+| `developer_options` | Forces the employee / internal gates to `true` so the internal **Developer Options / MobileConfig** menu becomes reachable. |
+| `ghost_mode` | Hides **story seen**, **DM seen** and the **typing indicator** (also available separately: `ghost_story_seen`, `ghost_dm_seen`, `ghost_typing`). |
+| `block_ads` | Neutralises ad-injection endpoints and ad-loading feature flags for sponsored content. |
 
-## 🤖 Connect with third-party apps using intents
+> **Read this first - patches are best-effort.** Instagram's code is obfuscated and changes every release.
+> The patcher does not use fixed class names; it finds methods through stable *string constants*
+> (API paths such as `indicate_activity`, flags such as `is_employee`). That is robust across versions but
+> not guaranteed. Every run produces a **patch report** (job summary + `patch-report-N.json`) showing exactly
+> which methods were rewritten, which were skipped, and which rules matched nothing. A build with
+> "0 patched" for a patch means that patch does **nothing** in that build.
 
-You can use intents to push commands to the app to run downloads without user interaction.
-Accepted variables:
+## Running the workflow
 
-<b>TYPE</b> -> it can be: audio,video,command <br/>
-<b>BACKGROUND</b> -> it can be: true,false. If its true the app won't show the download card no matter what and run the download in the background <br/>
+1. Get a stock Instagram APK (single `.apk`, or a `.apkm` / `.xapk` split bundle - bundles are merged automatically).
+   You need a **direct download link** (not an HTML page), e.g. a file host or your own storage.
+   Alternatively commit the file to a **private** copy of this repo (`git add -f input/instagram.apk`).
+2. Go to **Actions → Build Instagram Mod → Run workflow**.
+3. Fill in the inputs:
 
-### An example of downloading an audio item in the background with Tasker
-1. Create Send Intent task
-2. Action: android.intent.action.SEND
-3. Cat: Default
-4. Mime Type: text/*
-5. Extra: android.intent.extra.TEXT:url (instead of "url" write the URL of the video you want to download)
-6. Extra: TYPE:audio
-7. Extra: BACKGROUND:true
+   | Input | Meaning |
+   |---|---|
+   | `apk_url` | Direct URL of the stock APK/APKM/XAPK. |
+   | `apk_path` | Used when `apk_url` is empty: repo path of a committed APK, e.g. `input/instagram.apk`. |
+   | `patches` | `all` (default) or a comma list, e.g. `ghost_mode,block_ads`. |
+   | `allow_null_returns` | Also stub methods that return objects. Needed for some ghost-mode hooks; tiny crash risk. |
+   | `strict` | Fail the run if a selected patch changed nothing. |
+   | `create_release` | Publish the APK as a pre-release. Off by default - the APK contains Instagram's code, so don't publish it from a public repo. |
 
-## 📄 License
+4. When the run finishes, open it and download the **Instagram-Mod-N** artifact (kept 14 days). The run
+   summary contains the patch report.
 
-[GNU GPL v3.0](https://github.com/deniscerri/ytdlnis/blob/main/LICENSE)
+Optional repository secrets for stable signing (otherwise a debug key is used): `KEYSTORE_BASE64`,
+`KEYSTORE_ALIAS`, `KEYSTORE_PASSWORD`, `KEYSTORE_KEY_PASSWORD`.
 
-Except for the source code licensed under the GPLv3 license, all other parties are prohibited from using the "YTDLnis" name as a downloader app, and the same is true for its derivatives. Derivatives include but are not limited to forks and unofficial builds.
+### Installing
+The mod is signed with a different key, so it **cannot update over the stock app**: uninstall stock Instagram
+first (or expect an install conflict). Facebook/Google sign-in flows tied to the original signature may not work;
+use username/password login.
 
-## 😁 Donate
+## Tuning patches when a release doesn't match
 
+1. Run with `strict` off and read the report: which rules say `no-match`, `too-broad`, or list *skipped* methods?
+2. Decode locally and look for the anchor:
+   ```bash
+   java -jar apktool.jar d -f -r -o decoded instagram.apk
+   grep -rln "indicate_activity" decoded/smali*
+   ```
+3. Edit the rule in `patcher/patches/*.py` (add strings / adjust `return_types`, `max_instructions`).
+4. Check without modifying anything: `python -m patcher decoded --patches ghost_typing --dry-run --report-dir out`.
 
-[<img src="https://raw.githubusercontent.com/WSTxda/WSTxda/main/images/BMC.svg"
-alt='Donate with BMC'
-height="80">](https://www.buymeacoffee.com/deniscerri)
+## Local usage
 
-## 🙏 Thanks
+```bash
+python -m patcher --list
+python -m patcher decoded --patches all --report-dir report [--allow-null-returns] [--dry-run] [--strict]
+python -m unittest discover -s tests -v      # unit tests (synthetic smali, no APK needed)
+```
+Requirements: Python 3.9+ (stdlib only), Java 17 + apktool + uber-apk-signer for the build steps (the workflow installs them).
 
-- [decipher3114](https://github.com/decipher3114) for the app's icon
-- [dvd](https://github.com/yausername/dvd) for being an example youtubedl-android implementation
-- [seal](https://github.com/JunkFood02/Seal) for certain design elements and features I wanted to have in this app when I started developing it
-- [youtubedl-android](https://github.com/yausername/youtubedl-android) for porting yt-dlp to Android
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) and its contributors for making this tool possible. Without it this app wouldn't exist
+## Layout
 
+```
+.github/workflows/build-mod.yml   manual build workflow (workflow_dispatch)
+.github/workflows/ci.yml          unit tests on push / PR
+patcher/smali.py                  smali parsing, stubs, parallel file index
+patcher/engine.py                 Rule / Patch engine
+patcher/patches/                  one module per patch (developer_options, ghost_mode, block_ads)
+patcher/apk.py                    APK/bundle detection + sanity check
+patcher/cli.py                    `python -m patcher`
+tests/                            unit tests
+```
 
-and to a lot of other people, such as contributors.
+### Adding a patch
+Create `patcher/patches/my_patch.py` exposing a `Patch` with one or more `Rule`s, then register it in
+`patcher/patches/__init__.py`.
+
+## Legal / risk notes
+Modifying Instagram violates its Terms of Use and can get an account restricted or banned - use a throwaway
+account. This project only contains patching scripts; you are responsible for the APK you feed it and for
+not redistributing Instagram's code. Not affiliated with Meta. Provided as-is under the MIT license.

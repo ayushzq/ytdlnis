@@ -1,13 +1,10 @@
-*.iml
-.gradle
-/local.properties
-/keystore.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-/benchmark
-*.png
-app/src/main/jniLibs
-.kotlin
+__pycache__/
+*.pyc
+work/
+dist/
+tools/
+# Never commit Instagram binaries to a public repo (use `git add -f` in a private repo if you must)
+*.apk
+*.apkm
+*.xapk
+*.apks

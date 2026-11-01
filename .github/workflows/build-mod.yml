@@ -1,0 +1,164 @@
+name: Build Instagram Mod
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct download URL of a stock Instagram APK / APKM / XAPK"
+        required: false
+        type: string
+      apk_path:
+        description: "Alternative to URL: path of an APK/APKM/XAPK committed to this repo (e.g. input/instagram.apk)"
+        required: false
+        type: string
+      patches:
+        description: 'Comma-separated patches or "all" (developer_options, ghost_mode, ghost_story_seen, ghost_dm_seen, ghost_typing, block_ads)'
+        required: false
+        default: all
+        type: string
+      allow_null_returns:
+        description: "Also neutralise methods that return objects (stronger ghost mode, small crash risk)"
+        required: false
+        default: false
+        type: boolean
+      strict:
+        description: "Fail the build if a selected patch changed nothing"
+        required: false
+        default: false
+        type: boolean
+      create_release:
+        description: "Publish the signed APK as a pre-release (leave off: it contains Instagram's code)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-mod-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run patcher unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Download build tools
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          gh release download --repo iBotPeaches/Apktool --pattern 'apktool_*.jar' --dir tools
+          gh release download --repo patrickfav/uber-apk-signer --pattern 'uber-apk-signer-*.jar' --dir tools
+          gh release download --repo REAndroid/APKEditor --pattern 'APKEditor-*.jar' --dir tools
+          mv tools/apktool_*.jar tools/apktool.jar
+          mv tools/uber-apk-signer-*.jar tools/uber-apk-signer.jar
+          mv tools/APKEditor-*.jar tools/APKEditor.jar
+          ls -lh tools
+
+      - name: Fetch stock Instagram APK
+        env:
+          APK_URL: ${{ inputs.apk_url }}
+          APK_PATH: ${{ inputs.apk_path }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          if [ -n "${APK_URL:-}" ]; then
+            echo "::add-mask::$APK_URL"
+            curl -fL --retry 3 --retry-delay 5 -A "Mozilla/5.0 (Linux; Android 14)" -o work/input.bin "$APK_URL"
+          elif [ -n "${APK_PATH:-}" ]; then
+            test -f "$APK_PATH" || { echo "::error::File not found: $APK_PATH"; exit 1; }
+            cp "$APK_PATH" work/input.bin
+          else
+            echo "::error::Provide either apk_url or apk_path"; exit 1
+          fi
+          ls -lh work/input.bin
+
+      - name: Prepare single APK (merge split bundles)
+        run: |
+          set -euo pipefail
+          KIND=$(python -m patcher.apk kind work/input.bin)
+          echo "Input type: $KIND"
+          case "$KIND" in
+            apk)    cp work/input.bin work/stock.apk ;;
+            bundle) cp work/input.bin work/input.apkm
+                    java -jar tools/APKEditor.jar m -i work/input.apkm -o work/stock.apk ;;
+            *)      echo "::error::Input is not an APK/APKM/XAPK file (is the URL a direct download link?)"; exit 1 ;;
+          esac
+          python -m patcher.apk check work/stock.apk
+
+      - name: Decode with apktool
+        run: java -Xmx6g -jar tools/apktool.jar d -f -r -o work/decoded work/stock.apk
+
+      - name: Apply patches
+        env:
+          PATCHES: ${{ inputs.patches }}
+          ALLOW_NULL: ${{ inputs.allow_null_returns }}
+          STRICT: ${{ inputs.strict }}
+        run: |
+          set -euo pipefail
+          ARGS=(--patches "${PATCHES:-all}" --report-dir work/report)
+          if [ "$ALLOW_NULL" = "true" ]; then ARGS+=(--allow-null-returns); fi
+          if [ "$STRICT" = "true" ]; then ARGS+=(--strict); fi
+          python -m patcher work/decoded "${ARGS[@]}"
+
+      - name: Publish patch report
+        if: always()
+        run: |
+          if [ -f work/report/report.md ]; then cat work/report/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Rebuild with apktool
+        run: java -Xmx6g -jar tools/apktool.jar b work/decoded -o work/unsigned.apk
+
+      - name: Align and sign
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KS_B64:-}" ]; then
+            echo "$KS_B64" | base64 -d > work/release.jks
+            java -jar tools/uber-apk-signer.jar -a work/unsigned.apk --allowResign \
+              --ks work/release.jks --ksAlias "$KS_ALIAS" --ksPass "$KS_PASS" \
+              --ksKeyPass "${KS_KEY_PASS:-$KS_PASS}" -o work/signed
+            rm -f work/release.jks
+          else
+            java -jar tools/uber-apk-signer.jar -a work/unsigned.apk --allowResign -o work/signed
+          fi
+          mkdir -p dist
+          cp "$(ls work/signed/*.apk | head -n1)" "dist/Instagram-Mod-${GITHUB_RUN_NUMBER}.apk"
+          cp work/report/report.json "dist/patch-report-${GITHUB_RUN_NUMBER}.json" || true
+          ls -lh dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Instagram-Mod-${{ github.run_number }}
+          path: dist/*
+          retention-days: 14
+
+      - name: Create pre-release
+        if: ${{ inputs.create_release }}
+        run: |
+          gh release create "mod-${GITHUB_RUN_NUMBER}" dist/* \
+            --title "Instagram Mod build ${GITHUB_RUN_NUMBER}" \
+            --notes "Automated build. See the workflow run's summary for the patch report." \
+            --prerelease
