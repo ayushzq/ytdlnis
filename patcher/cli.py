@@ -35,9 +35,9 @@ def _markdown(results: list[PatchResult], opts: Options) -> str:
                     "",
                 ]
             if r.skipped:
-                out += [f"<details><summary>Skipped by `{r.rule_id}` ({len(r.skipped)})</summary>", ""]
-                out += [f"- `{h.class_name}->{h.signature}` - {h.reason}" for h in r.skipped[:50]]
-                out += ["", "</details>", ""]
+                out += [f"### Skipped by `{r.rule_id}` ({len(r.skipped)})", ""]
+                out += [f"- `{h.class_name}->{h.signature}` - {h.reason}" for h in r.skipped[:30]]
+                out.append("")
     return "\n".join(out)
 
 

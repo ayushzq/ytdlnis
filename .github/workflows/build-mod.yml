@@ -116,7 +116,7 @@ jobs:
         run: |
           mkdir -p work/report
           python -m patcher.discover work/decoded --out work/report/discover.md
-          head -n 200 work/report/discover.md >> "$GITHUB_STEP_SUMMARY"
+          cat work/report/discover.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply patches
         env:

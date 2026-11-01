@@ -27,9 +27,23 @@ DM_SEEN = Patch(
     rules=[
         Rule(
             id="dm_seen_endpoint",
-            description="Redirect DM 'seen' endpoints to a dead path",
+            description="Redirect DM / visual-message 'seen' endpoints to a dead path",
             action="rewrite",
-            strings=("/items/%s/seen/", "mark_visual_item_seen", "direct_v2/threads/%s/seen"),
+            strings=(
+                "/items/%s/seen/",
+                "mark_visual_item_seen",
+                "direct_v2/threads/%s/seen",
+                "direct_v2/visual_threads/%s/visual_items/%s/seen/",
+                "direct_v2/visual_threads/%s/item_seen/",
+            ),
+        ),
+        Rule(
+            id="dm_seen_send_stub",
+            description="Void methods that send the DM 'item seen' mutation / mark-thread-seen job -> no-op",
+            action="default",
+            return_types=("V",),
+            strings=("xig_direct_item_seen", "IGDirectItemSeenMutation", "mark_thread_seen-"),
+            max_instructions=120,
         ),
     ],
 )

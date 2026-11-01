@@ -14,11 +14,14 @@ from pathlib import Path
 from .smali import SmaliFile, iter_smali_files
 
 GROUPS: dict[str, str] = {
-    "dm_seen": r"(?:direct|thread|item).*(?:seen|read_receipt|mark_read)|(?:seen|read_receipt).*(?:thread|item|direct)|mark_(?:thread|visual|item)\w*",
-    "story_seen": r"(?:media|reel|story|stories)\w*/?\w*seen|seen\w*(?:reel|story)",
     "employee_dev": r"is_?(?:ig_)?employee|is_?internal|internal_?(?:settings|user|build)|dev(?:eloper)?_?options|mobile_?config_?(?:override|debug)|qe_?sandbox",
     "typing": r"indicate_activity|typing_?indicator|activity_?indicator",
+    "dm_seen": r"(?:direct|thread|item).*(?:seen|read_receipt|mark_read)|(?:seen|read_receipt).*(?:thread|item|direct)|mark_(?:thread|visual|item)\w*",
+    "story_seen": r"(?:media|reel|story|stories)\w*/?\w*seen|seen\w*(?:reel|story)",
 }
+# UI/NUX bookkeeping that is never an endpoint
+NOISE = re.compile(r"nux|upsell|last_?seen|seen_?count|timestamp|tooltip|banner|dialog|badge|preference_|\.kt:|SeenIndicator|Unseen", re.I)
+NOISE_EXEMPT = {"employee_dev", "typing"}
 
 
 def scan(root: Path, groups: dict[str, str], limit: int) -> dict[str, list[str]]:
@@ -35,7 +38,7 @@ def scan(root: Path, groups: dict[str, str], limit: int) -> dict[str, list[str]]
         for m in f.methods():
             for s in f.strings(m):
                 for k, rx in compiled.items():
-                    if rx.search(s):
+                    if rx.search(s) and (k in NOISE_EXEMPT or not NOISE.search(s)):
                         out.append((k, f"`{f.class_name}->{m.signature}` : \"{s[:120]}\""))
         return out
 
@@ -52,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m patcher.discover")
     ap.add_argument("decoded_dir", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--limit", type=int, default=150, help="max lines per group")
+    ap.add_argument("--limit", type=int, default=60, help="max lines per group")
     args = ap.parse_args(argv)
     if not args.decoded_dir.is_dir():
         print("error: decoded_dir not found", file=sys.stderr)

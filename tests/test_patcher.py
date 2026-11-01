@@ -43,6 +43,13 @@ GHOST = """.class public Lcom/ig/Net;
     return-void
 .end method
 
+.method public static H3T(Ljava/lang/String;)V
+    .locals 2
+    const-string v0, "xig_direct_item_seen"
+    invoke-static {v0}, Lcom/ig/Http;->post(Ljava/lang/String;)V
+    return-void
+.end method
+
 .method public static storySeen()Ljava/lang/Object;
     .locals 1
     const-string v0, "media/seen/"
@@ -100,7 +107,8 @@ class PatchTests(unittest.TestCase):
     def test_ghost_rewrites_and_stubs(self):
         res, texts = self.run_patch("ghost_mode")
         net = texts["Net.smali"]
-        self.assertEqual(res.patched, 3)
+        self.assertEqual(res.patched, 4)
+        self.assertNotIn("xig_direct_item_seen", net)
         # typing sender (void) is stubbed
         self.assertNotIn("indicate_activity", net)
         # seen endpoints are redirected, methods keep their bodies/return types
