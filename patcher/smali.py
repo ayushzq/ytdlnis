@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 _SIG = re.compile(r"^(?P<name>.+?)\((?P<params>[^)]*)\)(?P<ret>.+)$")
-_CONST_STRING = re.compile(r'^\s*const-string(?:/jumbo)?\s+[vp]\d+,\s*"(?P<s>.*)"\s*$')
+_CONST_STRING = re.compile(
+    r'^(?P<head>\s*const-string(?:/jumbo)?\s+[vp]\d+,\s*)"(?P<s>.*)"\s*$'
+)
 _FIELD_REF = re.compile(
     r"^\s*[is]get[\w-]*\s+[vp]\d+,\s*(?:[vp]\d+,\s*)?(?P<ref>L\S+->\S+)\s*$"
 )
@@ -90,6 +92,16 @@ class SmaliFile:
             hit = _CONST_STRING.match(line)
             if hit:
                 yield hit["s"]
+
+    def rewrite_strings(self, m: Method, should_rewrite, prefix: str) -> int:
+        """Prefix every matching const-string in the method; returns how many changed."""
+        changed = 0
+        for i in range(m.start + 1, m.end):
+            hit = _CONST_STRING.match(self.lines[i])
+            if hit and not hit["s"].startswith(prefix) and should_rewrite(hit["s"]):
+                self.lines[i] = f'{hit["head"]}"{prefix}{hit["s"]}"'
+                changed += 1
+        return changed
 
     def field_refs(self, m: Method) -> Iterator[str]:
         for line in self.body(m):

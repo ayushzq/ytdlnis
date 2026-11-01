@@ -19,6 +19,10 @@ stock APK ──apktool d──▶ smali ──python patcher──▶ patched s
 > not guaranteed. Every run produces a **patch report** (job summary + `patch-report-N.json`) showing exactly
 > which methods were rewritten, which were skipped, and which rules matched nothing. A build with
 > "0 patched" for a patch means that patch does **nothing** in that build.
+>
+> Techniques: **rewrite** prefixes the endpoint string with `ghost_blocked/` so the request 404s (used for
+> story/DM seen and ad endpoints - never nulls anything); **stub** replaces a void/boolean method body
+> (typing sender, employee gates).
 
 ## Running the workflow
 
@@ -33,7 +37,8 @@ stock APK ──apktool d──▶ smali ──python patcher──▶ patched s
    | `apk_url` | Direct URL of the stock APK/APKM/XAPK. |
    | `apk_path` | Used when `apk_url` is empty: repo path of a committed APK, e.g. `input/instagram.apk`. |
    | `patches` | `all` (default) or a comma list, e.g. `ghost_mode,block_ads`. |
-   | `allow_null_returns` | Also stub methods that return objects. Needed for some ghost-mode hooks; tiny crash risk. |
+   | `allow_null_returns` | Only affects `action="default"` stubs of object-returning methods (returns null). Leave OFF unless a report tells you to; ghost mode and ad blocking use safe string rewriting and don't need it. |
+   | `discover` | Adds a list of candidate anchor strings (seen / employee / dev-options) to the run summary. Handy when a new release breaks a rule. |
    | `strict` | Fail the run if a selected patch changed nothing. |
    | `create_release` | Publish the APK as a pre-release. Off by default - the APK contains Instagram's code, so don't publish it from a public repo. |
 

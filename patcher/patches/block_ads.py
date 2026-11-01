@@ -1,7 +1,7 @@
 """Block sponsored content.
 
 Two layers, both anchored on string constants:
-  1. Ad-delivery endpoints (e.g. story ad injection) are neutralised.
+  1. Ad-delivery endpoints (e.g. story ad injection) are redirected to a dead path.
   2. Boolean feature-flag helpers for feed/stories/reels ad loading return false.
 Server-side ad insertion changes often; check the report to see what matched.
 """
@@ -13,9 +13,9 @@ PATCH = Patch(
     rules=[
         Rule(
             id="ad_endpoints",
-            description="Requests that inject sponsored content into stories / feed",
-            action="default",
-            strings=("feed/injected_reels_media/", "ads/graphql/", "feed/ads/"),
+            description="Redirect ad-delivery endpoints (story ad injection, ads GraphQL) to a dead path",
+            action="rewrite",
+            strings=("feed/injected_reels_media/", "ads/graphql/"),
         ),
         Rule(
             id="ad_feature_flags",

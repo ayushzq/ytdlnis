@@ -97,25 +97,60 @@ class PatchTests(unittest.TestCase):
         self.assertIn("const/4 v0, 0x1", texts["Dev.smali"])
         self.assertIn('const-string v0, "is_employee"', texts["Dev.smali"])  # String getter untouched
 
-    def test_ghost_skips_object_returns_by_default(self):
+    def test_ghost_rewrites_and_stubs(self):
         res, texts = self.run_patch("ghost_mode")
-        self.assertEqual(res.patched, 2)
-        self.assertNotIn("indicate_activity", texts["Net.smali"])
-        self.assertNotIn("items/%s/seen/", texts["Net.smali"])
-        self.assertIn("media/seen/", texts["Net.smali"])  # object return left alone
-        skipped = [h for r in res.rules for h in r.skipped]
-        self.assertEqual(len(skipped), 1)
-
-    def test_ghost_allow_null(self):
-        res, texts = self.run_patch("ghost_mode", allow_null_returns=True)
+        net = texts["Net.smali"]
         self.assertEqual(res.patched, 3)
-        self.assertNotIn("media/seen/", texts["Net.smali"])
-        self.assertIn("return-object v0", texts["Net.smali"])
+        # typing sender (void) is stubbed
+        self.assertNotIn("indicate_activity", net)
+        # seen endpoints are redirected, methods keep their bodies/return types
+        self.assertIn('"ghost_blocked/direct_v2/threads/%s/items/%s/seen/"', net)
+        self.assertIn('"ghost_blocked/media/seen/"', net)
+        self.assertIn("return-object v0", net)
+        self.assertEqual([h for r in res.rules for h in r.skipped], [])
+
+    def test_rewrite_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            patch = REGISTRY["ghost_story_seen"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            patch.apply(root, cands, Options())
+            res = patch.apply(root, cands, Options())
+            self.assertEqual(res.patched, 0)
+            self.assertNotIn("ghost_blocked/ghost_blocked/", (root / "smali_classes2/com/ig/Net.smali").read_text())
+
+    def test_typing_ignores_log_messages(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            (root / "smali_classes2/com/ig/Rt.smali").write_text(
+                ".class public Lcom/ig/Rt;\n.super Ljava/lang/Object;\n\n"
+                ".method public handle()V\n    .locals 1\n"
+                '    const-string v0, "indicate_activity: in addOrReplace"\n    return-void\n.end method\n'
+            )
+            patch = REGISTRY["ghost_typing"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            res = patch.apply(root, cands, Options())
+            self.assertIn("indicate_activity: in addOrReplace", (root / "smali_classes2/com/ig/Rt.smali").read_text())
+            self.assertEqual(res.patched, 1)  # only the sender in Net.smali
+
+    def test_null_stub_needs_opt_in(self):
+        rule = Rule(id="r", description="r", strings=("media/seen/",))
+        from patcher.engine import Patch
+        patch = Patch("t", "t", [rule])
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            cands = find_candidates(root, {"t": patch.needles})["t"]
+            res = patch.apply(root, cands, Options())
+            self.assertEqual(res.patched, 0)
+            self.assertEqual(len(res.rules[0].skipped), 1)
+            res = patch.apply(root, cands, Options(allow_null_returns=True))
+            self.assertEqual(res.patched, 1)
 
     def test_dry_run_changes_nothing(self):
         res, texts = self.run_patch("ghost_mode", dry_run=True)
         self.assertEqual(res.patched, 0)
         self.assertIn("indicate_activity", texts["Net.smali"])
+        self.assertNotIn("ghost_blocked", texts["Net.smali"])
 
     def test_too_broad_cap(self):
         res, texts = self.run_patch("ghost_mode", max_matches=0)
@@ -126,6 +161,8 @@ class PatchTests(unittest.TestCase):
             Rule(id="x", description="x", action="true", strings=("a",))
         with self.assertRaises(ValueError):
             Rule(id="x", description="x", string_regex="a")
+        with self.assertRaises(ValueError):
+            Rule(id="x", description="x", action="rewrite", field_regex="a", prefilter=("a",))
 
     def test_resolve(self):
         self.assertEqual([p.name for p in resolve("all")], ["developer_options", "ghost_mode", "block_ads"])
@@ -149,6 +186,16 @@ class CliTests(unittest.TestCase):
             root = make_tree(Path(t))
             self.assertEqual(main([str(root), "-p", "block_ads", "--strict"]), 2)
             self.assertEqual(main([str(root), "-p", "block_ads"]), 0)
+
+    def test_discover(self):
+        from patcher.discover import main as discover
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            out = Path(t) / "d.md"
+            self.assertEqual(discover([str(root), "--out", str(out)]), 0)
+            text = out.read_text()
+            self.assertIn("is_employee", text)
+            self.assertIn("indicate_activity", text)
 
     def test_requires_smali(self):
         with tempfile.TemporaryDirectory() as t:

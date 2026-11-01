@@ -26,6 +26,11 @@ on:
         required: false
         default: false
         type: boolean
+      discover:
+        description: "Also list candidate anchor strings (seen / employee / dev options) in the run summary"
+        required: false
+        default: true
+        type: boolean
       create_release:
         description: "Publish the signed APK as a pre-release (leave off: it contains Instagram's code)"
         required: false
@@ -106,6 +111,13 @@ jobs:
       - name: Decode with apktool
         run: java -Xmx6g -jar tools/apktool.jar d -f -r -o work/decoded work/stock.apk
 
+      - name: Discover anchors
+        if: ${{ inputs.discover }}
+        run: |
+          mkdir -p work/report
+          python -m patcher.discover work/decoded --out work/report/discover.md
+          head -n 200 work/report/discover.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Apply patches
         env:
           PATCHES: ${{ inputs.patches }}
@@ -122,6 +134,15 @@ jobs:
         if: always()
         run: |
           if [ -f work/report/report.md ]; then cat work/report/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload patch report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-report-${{ github.run_number }}
+          path: work/report/*
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Rebuild with apktool
         run: java -Xmx6g -jar tools/apktool.jar b work/decoded -o work/unsigned.apk

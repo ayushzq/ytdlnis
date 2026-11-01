@@ -8,7 +8,8 @@ from typing import Iterable
 
 from .smali import Method, SmaliFile, count_params, make_stub
 
-ACTIONS = {"true", "false", "default"}
+ACTIONS = {"true", "false", "default", "rewrite"}
+REWRITE_PREFIX = "ghost_blocked/"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,9 @@ class Rule:
       "true"    - body becomes `return true`  (requires return_types == ("Z",))
       "false"   - body becomes `return false` / 0
       "default" - void -> return-void, primitives -> 0, references -> null
+      "rewrite" - keep the method, but prefix the matching string constants with
+                  "ghost_blocked/" so requests hit a dead path (404) instead of the real
+                  endpoint. Safe for any return type; nothing is nulled.
     """
 
     id: str
@@ -46,17 +50,23 @@ class Rule:
             raise ValueError(f"rule {self.id}: action 'true' needs return_types=('Z',)")
         if not self.needles:
             raise ValueError(f"rule {self.id}: regex rules need prefilter substrings")
+        if self.action == "rewrite" and (self.field_regex or not (self.strings or self.string_regex)):
+            raise ValueError(f"rule {self.id}: 'rewrite' needs string criteria only")
 
     @property
     def needles(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(self.strings + self.prefilter))
 
+    def string_matches(self, s: str) -> bool:
+        if any(n in s for n in self.strings):
+            return True
+        return bool(self.string_regex and re.search(self.string_regex, s))
+
     def _reason(self, f: SmaliFile, m: Method) -> str | None:
         for s in f.strings(m):
-            for needle in self.strings:
-                if needle in s:
-                    return f'string "{s[:80]}"'
-            if self.string_regex and re.search(self.string_regex, s):
+            if self.string_matches(s):
+                if self.action == "rewrite" and s.startswith(REWRITE_PREFIX):
+                    continue  # already patched
                 return f'string "{s[:80]}"'
         if self.field_regex:
             for ref in f.field_refs(m):
@@ -74,6 +84,8 @@ class Rule:
         reason = self._reason(f, m)
         if reason is None:
             return None
+        if self.action == "rewrite":
+            return "match", reason
         if self.return_types is not None and m.ret not in self.return_types:
             return "skipped", f"{reason}; return type {m.ret} not allowed by rule"
         if m.returns_reference and not allow_null:
@@ -157,7 +169,10 @@ class Patch:
                     by_file.setdefault(f.path, (f, []))[1].append(m)
                 for f, methods in by_file.values():
                     for m in sorted(methods, key=lambda x: x.start, reverse=True):
-                        f.replace_body(m, make_stub(m.ret, boolean=rule.action == "true"))
+                        if rule.action == "rewrite":
+                            f.rewrite_strings(m, rule.string_matches, REWRITE_PREFIX)
+                        else:
+                            f.replace_body(m, make_stub(m.ret, boolean=rule.action == "true"))
                     f.save()
                 status = "applied"
             results.append(RuleResult(rule.id, rule.description, status, hits, skipped))

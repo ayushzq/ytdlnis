@@ -1,9 +1,10 @@
 """Ghost mode: stop Instagram from telling other people what you looked at.
 
-The seen / typing signals are plain API calls whose URL path is a string constant,
-so the rules locate the method that references that path and neutralise it.
-Methods returning objects are only touched with --allow-null-returns because
-returning null from them can crash callers; they are always listed in the report.
+The seen / typing signals are API calls whose path is a string constant. Two techniques:
+
+* "rewrite": the endpoint string is prefixed with "ghost_blocked/", so the request goes to a
+  dead path (404). Nothing is nulled, so it is safe for methods returning request objects.
+* stub: methods that only SEND typing indicators (void) are replaced by `return-void`.
 """
 from .base import Patch, Rule
 
@@ -13,8 +14,8 @@ STORY_SEEN = Patch(
     rules=[
         Rule(
             id="story_seen_endpoint",
-            description="Request code for the story 'media seen' endpoints",
-            action="default",
+            description="Redirect the story/reel 'media seen' endpoints to a dead path",
+            action="rewrite",
             strings=("media/seen/", "media/%s/seen/", "reels_media_seen", "mark_stories_seen"),
         ),
     ],
@@ -26,22 +27,33 @@ DM_SEEN = Patch(
     rules=[
         Rule(
             id="dm_seen_endpoint",
-            description="Request code for DM 'seen' endpoints",
-            action="default",
+            description="Redirect DM 'seen' endpoints to a dead path",
+            action="rewrite",
             strings=("/items/%s/seen/", "mark_visual_item_seen", "direct_v2/threads/%s/seen"),
         ),
     ],
 )
+
+_TYPING_RE = r"(?:^|/)indicate_activity/?$"  # exact path only, not log messages
 
 TYPING = Patch(
     name="ghost_typing",
     description="Hide the typing indicator in direct messages.",
     rules=[
         Rule(
-            id="typing_indicator_endpoint",
-            description="Request code for the DM 'indicate_activity' (typing) endpoint",
+            id="typing_send_stub",
+            description="Void/boolean methods that send the typing indicator -> no-op",
             action="default",
-            strings=("indicate_activity",),
+            return_types=("V", "Z"),
+            string_regex=_TYPING_RE,
+            prefilter=("indicate_activity",),
+        ),
+        Rule(
+            id="typing_endpoint_rewrite",
+            description="Any other user of the typing endpoint -> dead path",
+            action="rewrite",
+            string_regex=_TYPING_RE,
+            prefilter=("indicate_activity",),
         ),
     ],
 )
