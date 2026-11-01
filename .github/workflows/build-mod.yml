@@ -122,8 +122,9 @@ jobs:
         if: ${{ inputs.discover }}
         run: |
           mkdir -p work/report
-          python -m patcher.xref work/decoded --out work/report/xref_dev.md \
-            --strings "Dev Options,internal_settings,INTERNAL_SETTINGS_BUTTON,DEVELOPER_OPTIONS,is_employee"
+          python -m patcher.xref work/decoded --out work/report/xref_dev.md --max-classes 12 --per-string 1 \
+            --names "com/instagram/(debug|devoptions)|[Ee]mployee|InternalSettings|Dogfood" \
+            --strings "Dev Options,com.instagram.debug.devoptions.sandboxselector.SandboxOverlayView,DEVELOPER_OPTIONS,INTERNAL_SETTINGS_BUTTON,is_employee"
           python -m patcher.xref work/decoded --out work/report/xref_dm.md --max-lines 120 \
             --strings "xig_direct_item_seen,mark_thread_seen-,direct_raven_mark_seen,send_thread_seen_marker"
 
@@ -144,17 +145,13 @@ jobs:
         run: |
           if [ -f work/report/report.md ]; then cat work/report/report.md >> "$GITHUB_STEP_SUMMARY"; fi
 
-      - name: Upload patch report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: patch-report-${{ github.run_number }}
-          path: work/report/*
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Rebuild with apktool
         run: java -Xmx6g -jar tools/apktool.jar b work/decoded -o work/unsigned.apk
+
+      - name: Restore zip compression (install-critical entries)
+        run: |
+          set -euo pipefail
+          python -m patcher.fixzip work/stock.apk work/unsigned.apk work/fixed.apk
 
       - name: Align and sign
         env:
@@ -164,19 +161,48 @@ jobs:
           KS_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          BT=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/ | sort -V | tail -n1)
+          echo "build-tools: $BT"
+          # page-align stored .so files (needed when extractNativeLibs=false), then sign without re-aligning
+          "${BT}zipalign" -f -P 16 4 work/fixed.apk work/aligned.apk || "${BT}zipalign" -f -p 4 work/fixed.apk work/aligned.apk
           if [ -n "${KS_B64:-}" ]; then
             echo "$KS_B64" | base64 -d > work/release.jks
-            java -jar tools/uber-apk-signer.jar -a work/unsigned.apk --allowResign \
+            java -jar tools/uber-apk-signer.jar -a work/aligned.apk --allowResign --skipZipAlign \
               --ks work/release.jks --ksAlias "$KS_ALIAS" --ksPass "$KS_PASS" \
               --ksKeyPass "${KS_KEY_PASS:-$KS_PASS}" -o work/signed
             rm -f work/release.jks
           else
-            java -jar tools/uber-apk-signer.jar -a work/unsigned.apk --allowResign -o work/signed
+            java -jar tools/uber-apk-signer.jar -a work/aligned.apk --allowResign --skipZipAlign -o work/signed
           fi
           mkdir -p dist
           cp "$(ls work/signed/*.apk | head -n1)" "dist/Instagram-Mod-${GITHUB_RUN_NUMBER}.apk"
           cp work/report/report.json "dist/patch-report-${GITHUB_RUN_NUMBER}.json" || true
           ls -lh dist
+
+      - name: Verify output APK (install diagnostics)
+        if: always()
+        run: |
+          BT=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/ | sort -V | tail -n1)
+          APK=$(ls dist/Instagram-Mod-*.apk 2>/dev/null | head -n1)
+          [ -n "$APK" ] || exit 0
+          {
+            echo "## Install diagnostics"; echo '```'
+            "${BT}apksigner" verify --verbose --print-certs "$APK" 2>&1 | head -n 20 || true
+            "${BT}zipalign" -c -P 16 4 "$APK" && echo "zipalign(16K): OK" || echo "zipalign(16K): NOT aligned"
+            python -m patcher.fixzip --check work/stock.apk "$APK" || true
+            "${BT}aapt2" dump badging "$APK" 2>/dev/null | grep -E "^(package|sdkVersion|targetSdkVersion|minSdkVersion|native-code|application-label:)" | head -n 12 || true
+            "${BT}aapt2" dump xmltree --file AndroidManifest.xml "$APK" 2>/dev/null | grep -iE "extractNativeLibs|isSplitRequired|splits.required|sharedUserId|installLocation" | head -n 8 || true
+            echo '```'
+          } | tee work/report/install-diagnostics.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload patch report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-report-${{ github.run_number }}
+          path: work/report/*
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

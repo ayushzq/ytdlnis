@@ -43,9 +43,21 @@ GHOST = """.class public Lcom/ig/Net;
     return-void
 .end method
 
-.method public static H3T(Ljava/lang/String;)V
+.method public H3T(LX/02qp;LX/0ntB;LX/0B3n;)V
+    .locals 5
+    .param p1, "cb"
+    const-string v0, "IGDirectItemSeenMutation"
+    const-string v1, "xig_direct_item_seen"
+    sget-object v2, LX/0FXy;->A0U:LX/0FXy;
+    invoke-interface {p2, v2, v3}, LX/0ntB;->Fu8(LX/0FXy;Ljava/lang/String;)V
+    sget-object v4, LX/000B;->A01:Ljava/lang/Integer;
+    invoke-static {p1, v4}, LX/0AEJ;->A00(LX/02qp;Ljava/lang/Integer;)V
+    return-void
+.end method
+
+.method public static A0A(Ljava/lang/String;)V
     .locals 2
-    const-string v0, "xig_direct_item_seen"
+    const-string v0, "mark_thread_seen-"
     invoke-static {v0}, Lcom/ig/Http;->post(Ljava/lang/String;)V
     return-void
 .end method
@@ -107,8 +119,14 @@ class PatchTests(unittest.TestCase):
     def test_ghost_rewrites_and_stubs(self):
         res, texts = self.run_patch("ghost_mode")
         net = texts["Net.smali"]
-        self.assertEqual(res.patched, 4)
-        self.assertNotIn("xig_direct_item_seen", net)
+        self.assertEqual(res.patched, 5)
+        self.assertNotIn("mark_thread_seen-", net)  # enqueue method stubbed
+        # mutation executor: pinned early exit injected before the first instruction
+        head = net.split(".method public H3T", 1)[1].split("const-string v0", 1)[0]
+        self.assertIn("# ghost-inject:dm_item_seen_mutation_abort", head)
+        self.assertIn("LX/0ntB;->Fu8", head)
+        self.assertIn("move-object/from16 v2, p2", head)
+        self.assertLess(head.index(".param p1"), head.index("ghost-inject"))
         # typing sender (void) is stubbed
         self.assertNotIn("indicate_activity", net)
         # seen endpoints are redirected, methods keep their bodies/return types
@@ -116,6 +134,23 @@ class PatchTests(unittest.TestCase):
         self.assertIn('"ghost_blocked/media/seen/"', net)
         self.assertIn("return-object v0", net)
         self.assertEqual([h for r in res.rules for h in r.skipped], [])
+
+    def test_inject_is_pinned_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            net = root / "smali_classes2/com/ig/Net.smali"
+            patch = REGISTRY["ghost_dm_seen"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            patch.apply(root, cands, Options())
+            once = net.read_text()
+            patch.apply(root, cands, Options())
+            self.assertEqual(once.count("ghost-inject:dm_item_seen_mutation_abort"), 1)
+            # a different release (pin anchor missing) must be skipped, not patched
+            net.write_text(once.replace("ghost-inject", "x").replace("LX/0AEJ;->A00", "LX/0ZZZ;->A00")
+                           .replace("    sget-object v0, LX/0FXy;->A0U:LX/0FXy;\n    const/4 v1, 0x0\n    move-object/from16 v2, p2\n", ""))
+            res = patch.apply(root, cands, Options())
+            skipped = [h.reason for r in res.rules for h in r.skipped]
+            self.assertTrue(any("version pin failed" in x for x in skipped))
 
     def test_rewrite_is_idempotent(self):
         with tempfile.TemporaryDirectory() as t:
@@ -229,6 +264,25 @@ class CliTests(unittest.TestCase):
             res = patch.apply(root, cands, Options())
             self.assertEqual(res.patched, 0)
             self.assertIn("too large", res.rules[0].skipped[0].reason)
+
+    def test_fixzip_restores_stored_entries(self):
+        import zipfile
+        from patcher.fixzip import restore, report
+        with tempfile.TemporaryDirectory() as t:
+            stock, built, out = (str(Path(t) / n) for n in ("s.apk", "b.apk", "o.apk"))
+            with zipfile.ZipFile(stock, "w") as z:
+                z.writestr("resources.arsc", b"a" * 2000, compress_type=zipfile.ZIP_STORED)
+                z.writestr("lib/arm64-v8a/liba.so", b"b" * 2000, compress_type=zipfile.ZIP_STORED)
+                z.writestr("classes.dex", b"c" * 2000, compress_type=zipfile.ZIP_DEFLATED)
+            with zipfile.ZipFile(built, "w", zipfile.ZIP_DEFLATED) as z:
+                for n in ("resources.arsc", "lib/arm64-v8a/liba.so", "classes.dex"):
+                    z.writestr(n, b"x" * 2000)
+            self.assertEqual(report(stock, built), 1)
+            self.assertEqual(restore(stock, built, out)["restored_to_stored"], 2)
+            self.assertEqual(report(stock, out), 0)
+            with zipfile.ZipFile(out) as z:
+                self.assertEqual(z.getinfo("classes.dex").compress_type, zipfile.ZIP_DEFLATED)
+                self.assertEqual(z.read("resources.arsc"), b"x" * 2000)
 
     def test_requires_smali(self):
         with tempfile.TemporaryDirectory() as t:

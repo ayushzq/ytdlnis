@@ -8,7 +8,7 @@ from typing import Iterable
 
 from .smali import Method, SmaliFile, count_params, make_stub
 
-ACTIONS = {"true", "false", "default", "rewrite"}
+ACTIONS = {"true", "false", "default", "rewrite", "inject"}
 REWRITE_PREFIX = "ghost_blocked/"
 
 
@@ -25,6 +25,9 @@ class Rule:
       "true"    - body becomes `return true`  (requires return_types == ("Z",))
       "false"   - body becomes `return false` / 0
       "default" - void -> return-void, primitives -> 0, references -> null
+      "inject"  - insert `inject` smali lines at the start of the method (e.g. an early,
+                  graceful return). `require` pins the exact code the injection was written
+                  for; if any anchor is missing the method is skipped, not patched.
       "rewrite" - keep the method, but prefix the matching string constants with
                   "ghost_blocked/" so requests hit a dead path (404) instead of the real
                   endpoint. Safe for any return type; nothing is nulled.
@@ -40,6 +43,8 @@ class Rule:
     prefilter: tuple[str, ...] = ()  # plain substrings used to pre-select files
     max_instructions: int | None = None
     max_params: int | None = None
+    inject: tuple[str, ...] = ()   # smali lines (no indent) inserted at method start
+    require: tuple[str, ...] = ()  # substrings that must ALL appear in the method body (version pin)
 
     def __post_init__(self) -> None:
         if self.action not in ACTIONS:
@@ -50,6 +55,8 @@ class Rule:
             raise ValueError(f"rule {self.id}: action 'true' needs return_types=('Z',)")
         if not self.needles:
             raise ValueError(f"rule {self.id}: regex rules need prefilter substrings")
+        if self.action == "inject" and not self.inject:
+            raise ValueError(f"rule {self.id}: 'inject' needs inject lines")
         if self.action == "rewrite" and (self.field_regex or not (self.strings or self.string_regex)):
             raise ValueError(f"rule {self.id}: 'rewrite' needs string criteria only")
 
@@ -74,9 +81,15 @@ class Rule:
                     return f"field {ref}"
         return None
 
+    @property
+    def marker(self) -> str:
+        return f"# ghost-inject:{self.id}"
+
     def check(self, f: SmaliFile, m: Method, allow_null: bool) -> tuple[str, str] | None:
         if not m.is_concrete or m.name in ("<init>", "<clinit>"):
             return None
+        if self.action == "inject" and any(self.marker in line for line in f.body(m)):
+            return None  # already injected
         reason = self._reason(f, m)
         if reason is None:
             return None
@@ -90,6 +103,12 @@ class Rule:
             return "match", reason
         if self.return_types is not None and m.ret not in self.return_types:
             return "skipped", f"{reason}; return type {m.ret} not allowed by rule"
+        if self.action == "inject":
+            text = "\n".join(f.body(m))
+            missing = [r for r in self.require if r not in text]
+            if missing:
+                return "skipped", f"{reason}; version pin failed, missing: {missing[0][:70]}"
+            return "match", reason
         if m.returns_reference and not allow_null:
             return "skipped", f"{reason}; returns {m.ret} (needs --allow-null-returns)"
         return "match", reason
@@ -173,6 +192,8 @@ class Patch:
                     for m in sorted(methods, key=lambda x: x.start, reverse=True):
                         if rule.action == "rewrite":
                             f.rewrite_strings(m, rule.string_matches, REWRITE_PREFIX)
+                        elif rule.action == "inject":
+                            f.inject_at_start(m, ["    " + rule.marker, *("    " + x for x in rule.inject)])
                         else:
                             f.replace_body(m, make_stub(m.ret, boolean=rule.action == "true"))
                     f.save()

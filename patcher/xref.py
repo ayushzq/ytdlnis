@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
-from .smali import SmaliFile, find_candidates
+from .smali import SmaliFile, find_candidates, iter_smali_files
 
 
 def trim(lines: list[str], limit: int) -> list[str]:
@@ -27,19 +28,30 @@ def trim(lines: list[str], limit: int) -> list[str]:
     return out
 
 
-def run(root: Path, strings: list[str], max_classes: int, max_methods: int, max_lines: int) -> str:
+def run(
+    root: Path, strings: list[str], max_classes: int, max_methods: int, max_lines: int,
+    per_string: int = 2, name_regex: str | None = None,
+) -> str:
     cands = find_candidates(root, {"s": strings})["s"]
-    wanted = set(strings)
     defining: dict[str, list[tuple[str, list[str]]]] = {}
+    taken: dict[str, set[str]] = {s: set() for s in strings}  # classes already chosen per string
     for path in cands:
         f = SmaliFile(path)
         for m in f.methods():
-            if m.is_concrete and wanted.intersection(f.strings(m)):
+            if not m.is_concrete:
+                continue
+            hit = [x for x in f.strings(m) if x in taken and (f.class_name in taken[x] or len(taken[x]) < per_string)]
+            if hit and len(defining) < max_classes + len(strings):
+                for x in hit:
+                    taken[x].add(f.class_name)
                 defining.setdefault(f.class_name, []).append((m.signature, trim(f.body(m), max_lines)))
-        if len(defining) >= max_classes:
-            break
 
     md = ["## Xref analysis", "", f"strings: `{', '.join(strings)}`", ""]
+    if name_regex:
+        rx = re.compile(name_regex)
+        names = sorted({str(p.relative_to(root)) for p in iter_smali_files(root) if rx.search(str(p))})
+        md += [f"### Classes whose path matches `{name_regex}` ({len(names)})", ""]
+        md += [f"- {n}" for n in names[:300]] + [""]
     types = list(defining)[:max_classes]
     refs = find_candidates(root, {t: [t] for t in types}) if types else {}
     for t in types:
@@ -74,12 +86,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-classes", type=int, default=8)
     ap.add_argument("--max-methods", type=int, default=6)
     ap.add_argument("--max-lines", type=int, default=70)
+    ap.add_argument("--per-string", type=int, default=2, help="max classes picked per string")
+    ap.add_argument("--names", help="also list class files whose path matches this regex")
     args = ap.parse_args(argv)
     if not args.decoded_dir.is_dir():
         print("error: decoded_dir not found", file=sys.stderr)
         return 1
     strings = [x for x in args.strings.split(",") if x]
-    text = run(args.decoded_dir, strings, args.max_classes, args.max_methods, args.max_lines)
+    text = run(args.decoded_dir, strings, args.max_classes, args.max_methods, args.max_lines, args.per_string, args.names)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text)
     print(f"wrote {args.out} ({len(text.splitlines())} lines)")

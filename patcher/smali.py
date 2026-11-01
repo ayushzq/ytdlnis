@@ -103,6 +103,25 @@ class SmaliFile:
                 changed += 1
         return changed
 
+    def inject_at_start(self, m: Method, lines: list[str]) -> None:
+        """Insert lines before the method's first real instruction (after .locals/.param/annotations)."""
+        body = self.body(m)
+        idx = len(body)
+        in_annotation = False
+        for i, line in enumerate(body):
+            t = line.strip()
+            if t.startswith(".annotation"):
+                in_annotation = True
+                continue
+            if t.startswith(".end annotation"):
+                in_annotation = False
+                continue
+            if in_annotation or not t or t[0] in ".#:":
+                continue
+            idx = i
+            break
+        self.lines[m.start + 1 : m.end] = body[:idx] + lines + body[idx:]
+
     def field_refs(self, m: Method) -> Iterator[str]:
         for line in self.body(m):
             hit = _FIELD_REF.match(line)
