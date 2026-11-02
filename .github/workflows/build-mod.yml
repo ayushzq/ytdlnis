@@ -234,20 +234,19 @@ jobs:
 
       - name: Upload patch report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: patch-report-${{ github.run_number }}
           path: work/report/*
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload APK (plain file, no zip)
+        uses: actions/upload-artifact@v7
         with:
-          name: Instagram-Mod-${{ github.run_number }}
-          path: dist/*
+          path: dist/Instagram-Mod-${{ github.run_number }}.apk
+          archive: false   # single file, downloads as a ready .apk (artifact name = file name)
           retention-days: 14
-          compression-level: 0  # APK is already compressed; a plain "stored" zip opens in every extractor app
 
       - name: Create pre-release
         if: ${{ inputs.create_release }}
