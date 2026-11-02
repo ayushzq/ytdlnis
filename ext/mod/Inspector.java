@@ -137,30 +137,29 @@ final class Inspector {
         sb.append("activity: ").append(a.getClass().getName()).append("\n\n");
         View root = a.findViewById(android.R.id.content);
 
-        sb.append("== ad detection per list row ==\n");
-        List<ViewGroup> rvs = new ArrayList<>();
-        Scan.collectRecyclers(root, rvs, new int[]{4000});
+        sb.append("== lists and rows (leaf RecyclerViews only) ==\n");
         Object firstMedia = null;
-        int rowNo = 0;
-        for (ViewGroup rv : rvs) {
-            for (int i = 0; i < rv.getChildCount(); i++) {
-                View row = rv.getChildAt(i);
+        int listNo = 0;
+        for (ViewGroup rv : UiScanner.leafRecyclers(root)) {
+            sb.append("list ").append(listNo++).append(": ").append(rv.getClass().getName())
+                    .append(" #").append(idName(rv)).append(" [").append(rv.getWidth()).append('x').append(rv.getHeight()).append("]\n");
+            for (UiScanner.Row row : UiScanner.rowsOf(rv)) {
                 Object media = null;
                 try {
                     Method m = rv.getClass().getMethod("getChildViewHolder", View.class);
-                    media = Scan.findMedia(m.invoke(rv, row), 4);
+                    media = Scan.findMedia(m.invoke(rv, row.v), 4);
                 } catch (Throwable ignored) {
                 }
-                if (media == null) media = Scan.findMediaInViewTags(row, 250);
-                if (firstMedia == null && media != null && row.isShown()) firstMedia = media;
-                sb.append("row ").append(rowNo++).append(": ").append(row.getClass().getName())
-                        .append(" h=").append(row.getHeight())
-                        .append(" ad=").append(UiScanner.isAdRow(row))
+                if (media == null) media = Scan.findMediaInViewTags(row.v, 250);
+                if (firstMedia == null && media != null && row.v.isShown()) firstMedia = media;
+                sb.append("  pos ").append(row.pos).append(" ").append(row.v.getClass().getSimpleName())
+                        .append(" h=").append(row.v.getHeight())
+                        .append(" adMarker=").append(UiScanner.hasAdMarker(row.v))
                         .append(" media=").append(media != null)
                         .append(" urls=").append(media == null ? 0 : Scan.urls(media).size()).append('\n');
             }
         }
-        if (rowNo == 0) sb.append("(no RecyclerView rows on this screen)\n");
+        if (listNo == 0) sb.append("(no RecyclerView on this screen)\n");
 
         if (firstMedia != null) {
             sb.append("\n== first visible Media: urls ==\n");

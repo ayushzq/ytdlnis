@@ -45,7 +45,8 @@ final class ModMenu {
                 final Switch sw = new Switch(ctx);
                 int installed = i < BuildInfo.HOOKS.length ? BuildInfo.HOOKS[i] : -1;
                 String state = installed < 0 ? "built-in" : installed == 0 ? "NOT in this build" : installed + " hook(s)";
-                sw.setText(Hooks.LABELS[i] + "\n" + state + "  |  blocked " + Hooks.hits(i) + "x");
+                String verb = i == 4 ? "hidden " : i == 5 ? "downloaded " : "blocked ";
+                sw.setText(Hooks.LABELS[i] + "\n" + state + "  |  " + verb + Hooks.hits(i) + "x");
                 sw.setChecked(Hooks.isOn(i));
                 sw.setPadding(0, dp(ctx, 10), 0, dp(ctx, 10));
                 sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {

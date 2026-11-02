@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths: ["patcher/**", "tests/**"]
+    paths: ["patcher/**", "tests/**", "ext/**"]
   pull_request:
 
 jobs:
@@ -15,3 +15,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Ad-group logic test (pure Java)
+        run: |
+          mkdir -p /tmp/adt
+          javac -d /tmp/adt ext/mod/AdLogic.java tests/java/mod/AdLogicTest.java
+          java -cp /tmp/adt mod.AdLogicTest

@@ -230,18 +230,78 @@ final class Scan {
         return best;
     }
 
-    /** First video if there is one, else the largest-looking image. */
+    /** The "vencode_tag" Instagram puts (base64 JSON) in the efg= query parameter, or null. */
+    static String encodeTag(String url) {
+        try {
+            int i = url.indexOf("efg=");
+            if (i < 0) return null;
+            int j = url.indexOf('&', i);
+            String raw = url.substring(i + 4, j < 0 ? url.length() : j);
+            raw = java.net.URLDecoder.decode(raw, "UTF-8");
+            byte[] bytes;
+            try {
+                bytes = java.util.Base64.getUrlDecoder().decode(raw);
+            } catch (IllegalArgumentException e) {
+                bytes = java.util.Base64.getMimeDecoder().decode(raw);
+            }
+            String json = new String(bytes, "UTF-8");
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"vencode_tag\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
+            return m.find() ? m.group(1) : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Height in pixels read from the encode tag (e.g. ".720." or "1080p"), 0 if unknown. */
+    static int heightOf(String tag) {
+        if (tag == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[._](\\d{3,4})(?:p)?[._]").matcher(tag);
+        int best = 0;
+        while (m.find()) best = Math.max(best, Integer.parseInt(m.group(1)));
+        return best;
+    }
+
+    /** Higher is better; -1 = audio-only stream (never pick it for a video download). */
+    static long videoScore(String url) {
+        String tag = encodeTag(url);
+        if (tag == null) return 0;
+        String t = tag.toLowerCase();
+        if (t.contains("audio") && !t.contains("video")) return -1;
+        long score = heightOf(tag);
+        if (t.contains("progressive")) score += 1_000_000L; // progressive mp4 has audio+video in one file
+        return score;
+    }
+
+    static String describe(String url) {
+        String tag = encodeTag(url);
+        int h = heightOf(tag);
+        String kind = tag != null && tag.toLowerCase().contains("progressive") ? "progressive" : "dash";
+        return (h > 0 ? h + "p " : "") + kind;
+    }
+
+    /** Best video (highest quality, with audio) if there is one, else the largest-looking image. */
     static String pick(List<String> urls) {
-        for (String u : urls) if (isVideo(u)) return u;
+        String bestVideo = null;
+        long bestScore = Long.MIN_VALUE;
+        for (String u : urls) {
+            if (!isVideo(u)) continue;
+            long sc = videoScore(u);
+            if (sc > bestScore) {
+                bestScore = sc;
+                bestVideo = u;
+            }
+        }
+        if (bestVideo != null && bestScore >= 0) return bestVideo;
         String best = null;
         long bestPx = -1;
         for (String u : urls) {
+            if (isVideo(u)) continue;
             long px = pixels(u);
             if (px > bestPx) {
                 bestPx = px;
                 best = u;
             }
         }
-        return best;
+        return best != null ? best : bestVideo;
     }
 }
