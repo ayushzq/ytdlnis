@@ -1,6 +1,7 @@
 """Block sponsored content.
 
-Two layers, both anchored on string constants:
+Layers, all anchored on string constants:
+  0. The Reels ad inserter's "meets min gap" check is forced to false, so ads are not put in the list at all.
   1. Ad-delivery endpoints (e.g. story ad injection) are redirected to a dead path.
   2. Boolean feature-flag helpers for feed/stories/reels ad loading return false.
 Server-side ad insertion changes often; check the report to see what matched.
@@ -17,6 +18,15 @@ PATCH = Patch(
             description="Redirect ad-delivery endpoints (story ad injection, ads GraphQL) to a dead path",
             action="rewrite",
             strings=("feed/injected_reels_media/", "ads/graphql/"),
+        ),
+        Rule(
+            id="reels_ad_insertion_gap",
+            description="Ad inserter 'sponsored item meets min gap' check -> false: no sponsored item is ever inserted into the Reels list",
+            action="false",
+            feature="ads",
+            return_types=("Z",),
+            strings=("sponsored_item_meets_min_gap",),
+            max_instructions=1500,
         ),
         Rule(
             id="ad_feature_flags",

@@ -152,8 +152,12 @@ final class Scan {
     }
 
     static Object findMedia(Object start, int maxDepth) {
+        return findMedia(start, maxDepth, 400);
+    }
+
+    static Object findMedia(Object start, int maxDepth, int maxNodes) {
         final Object[] res = new Object[1];
-        walk(start, maxDepth, 400, new Visitor() {
+        walk(start, maxDepth, maxNodes, new Visitor() {
             @Override
             public boolean visit(Object o, int depth) {
                 if (isMedia(o)) {
@@ -185,10 +189,95 @@ final class Scan {
         return null;
     }
 
+    /** Media sitting in the adapter's data list at `pos` (fallback when the view holder does not expose it). */
+    static Object mediaFromAdapter(Object adapter, final int pos) {
+        if (adapter == null || pos < 0) return null;
+        final Object[] res = new Object[1];
+        walk(adapter, 3, 800, new Visitor() {
+            @Override
+            public boolean visit(Object o, int depth) {
+                if (o instanceof List) {
+                    List<?> l = (List<?>) o;
+                    if (l.size() > pos && l.get(pos) != null) {
+                        Object m = findMedia(l.get(pos), 3, 300);
+                        if (m != null) {
+                            res[0] = m;
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        });
+        return res[0];
+    }
+
+    /** Media held by the resumed fragments of the activity (story viewer keeps its state there). */
+    static Object mediaFromFragments(Object activity) {
+        try {
+            Object fm = activity.getClass().getMethod("getSupportFragmentManager").invoke(activity);
+            Object frags = fm.getClass().getMethod("getFragments").invoke(fm);
+            return mediaFromFragmentList((List<?>) frags, 0);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Object mediaFromFragmentList(List<?> frags, int level) {
+        for (Object f : frags) {
+            try {
+                if (f == null) continue;
+                Boolean resumed = (Boolean) f.getClass().getMethod("isResumed").invoke(f);
+                if (!Boolean.TRUE.equals(resumed)) continue;
+                Object m = findMedia(f, 5, 2500);
+                if (m != null) return m;
+                if (level < 2) {
+                    Object cfm = f.getClass().getMethod("getChildFragmentManager").invoke(f);
+                    Object kids = cfm.getClass().getMethod("getFragments").invoke(cfm);
+                    Object r = mediaFromFragmentList((List<?>) kids, level + 1);
+                    if (r != null) return r;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Download candidates, best first. A video post only ever yields video links (never the cover
+     * photo), audio-only streams are dropped, progressive mp4 (audio+video in one file) wins.
+     */
+    static List<String> candidates(List<String> urls, boolean expectVideo) {
+        List<String> vids = new ArrayList<>();
+        List<String> imgs = new ArrayList<>();
+        for (String u : urls) {
+            if (isVideo(u)) {
+                if (videoScore(u) >= 0) vids.add(u);
+            } else {
+                imgs.add(u);
+            }
+        }
+        java.util.Collections.sort(vids, new java.util.Comparator<String>() {
+            @Override
+            public int compare(String x, String y) {
+                return Long.compare(videoScore(y), videoScore(x));
+            }
+        });
+        java.util.Collections.sort(imgs, new java.util.Comparator<String>() {
+            @Override
+            public int compare(String x, String y) {
+                return Long.compare(pixels(y), pixels(x));
+            }
+        });
+        List<String> out = new ArrayList<>(vids);
+        if (!expectVideo) out.addAll(imgs);
+        return out;
+    }
+
     /** CDN urls reachable from a Media object, in discovery order. */
     static List<String> urls(Object media) {
         final List<String> out = new ArrayList<>();
-        walk(media, 4, 600, new Visitor() {
+        walk(media, 6, 3000, new Visitor() {
             @Override
             public boolean visit(Object o, int depth) {
                 try {

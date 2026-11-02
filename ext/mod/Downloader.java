@@ -1,36 +1,45 @@
 package mod;
 
 import android.app.Activity;
-import android.app.DownloadManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
-import android.database.Cursor;
 import android.media.MediaMetadataRetriever;
-import android.media.MediaScannerConnection;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import java.io.File;
-import android.net.Uri;
-import android.os.Environment;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.widget.Toast;
 
+import java.io.BufferedInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Saves the best CDN url to Movies/ or Pictures/ (InstagramMod). The system shows a "Downloading"
- * progress notification; when it finishes we post a "Download complete" notification with the facts
- * (duration, size, audio, quality, time taken) so a bad/short/silent file is obvious.
+ * Downloads from inside the app process (no DownloadManager): every candidate link is tried in
+ * order, a link that returns an error or is not really an mp4 is skipped, the file is written
+ * straight into MediaStore (so the Gallery lists it immediately) and the result - or the exact
+ * reason for a failure - is shown as a notification and a toast.
  */
 final class Downloader {
     private static final String CHANNEL = "igmod_downloads";
+    private static final String UA =
+            "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final AtomicInteger IDS = new AtomicInteger(1);
 
     private Downloader() {}
 
@@ -39,20 +48,18 @@ final class Downloader {
         Object get();
     }
 
-    private static final Handler MAIN = new Handler(Looper.getMainLooper());
-
-    static void download(final Activity a, final Source src) {
-        attempt(a, src, 0);
+    static void download(final Activity a, final Source src, final boolean expectVideo) {
+        attempt(a, src, expectVideo, 0);
     }
 
-    private static void attempt(final Activity a, final Source src, final int n) {
+    private static void attempt(final Activity a, final Source src, final boolean expectVideo, final int n) {
         Object media = null;
         try {
             media = src.get();
         } catch (Throwable ignored) {
         }
         if (media != null) {
-            download(a, media);
+            download(a, media, expectVideo);
             return;
         }
         if (n >= 10) {
@@ -63,47 +70,30 @@ final class Downloader {
         MAIN.postDelayed(new Runnable() {
             @Override
             public void run() {
-                attempt(a, src, n + 1);
+                attempt(a, src, expectVideo, n + 1);
             }
         }, 200);
     }
 
-    static void download(final Activity a, Object media) {
+    static void download(final Activity a, Object media, final boolean expectVideo) {
         try {
-            if (media == null) {
-                Toast.makeText(a, "No media found for this item (use Inspect screen)", Toast.LENGTH_LONG).show();
+            final List<String> urls = Scan.urls(media);
+            final List<String> candidates = Scan.candidates(urls, expectVideo);
+            if (candidates.isEmpty()) {
+                Toast.makeText(a, (expectVideo ? "Video link not found" : "Media link not found") + " (" + urls.size()
+                        + " links seen). Use Inspect screen.", Toast.LENGTH_LONG).show();
                 return;
             }
-            List<String> urls = Scan.urls(media);
-            final String url = Scan.pick(urls);
-            if (url == null) {
-                Toast.makeText(a, "No downloadable URL found (" + urls.size() + " candidates)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            final boolean video = Scan.isVideo(url);
-            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            final String name = "IGMod_" + stamp + (video ? ".mp4" : ".jpg");
-            final String quality = video ? Scan.describe(url) : "photo";
-
-            DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
-            r.setTitle(name);
-            r.setDescription("Downloading " + (video ? "video" : "photo") + "...");
-            // progress while running, and a "Download complete" entry that stays in the shade afterwards
-            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            r.setDestinationInExternalPublicDir(
-                    video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES, "InstagramMod/" + name);
-            r.allowScanningByMediaScanner();
-            final DownloadManager dm = (DownloadManager) a.getSystemService(Context.DOWNLOAD_SERVICE);
-            final long id = dm.enqueue(r);
-            final long started = SystemClock.elapsedRealtime();
-            Hooks.bump(5);
-            Toast.makeText(a, "Downloading " + (video ? "video" : "photo") + " (" + quality + ")", Toast.LENGTH_SHORT).show();
-
             final Context app = a.getApplicationContext();
+            final int id = IDS.getAndIncrement();
+            Hooks.bump(5);
+            String first = candidates.get(0);
+            Toast.makeText(a, "Downloading " + (Scan.isVideo(first) ? "video (" + Scan.describe(first) + ")" : "photo") + "...",
+                    Toast.LENGTH_SHORT).show();
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    watch(app, dm, id, name, video, quality, started);
+                    runAll(app, id, candidates);
                 }
             }, "igmod-dl").start();
         } catch (Throwable t) {
@@ -114,36 +104,129 @@ final class Downloader {
         }
     }
 
-    private static void watch(Context ctx, DownloadManager dm, long id, String name, boolean video, String quality, long started) {
-        try {
-            for (int i = 0; i < 1200; i++) { // up to ~10 minutes
-                Cursor c = dm.query(new DownloadManager.Query().setFilterById(id));
-                try {
-                    if (c != null && c.moveToFirst()) {
-                        int status = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_STATUS));
-                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                            long size = c.getLong(c.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-                            Uri uri = dm.getUriForDownloadedFile(id);
-                            done(ctx, id, name, video, quality, started, size, uri);
-                            return;
-                        }
-                        if (status == DownloadManager.STATUS_FAILED) {
-                            int reason = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_REASON));
-                            notify(ctx, (int) id, "Download failed", name + " (error " + reason + ")", null, false);
-                            toastMain(ctx, "Download failed (error " + reason + ")");
-                            return;
-                        }
-                    } else {
-                        return; // removed by the user
-                    }
-                } finally {
-                    if (c != null) c.close();
+    // ------------------------------------------------------------------ worker
+
+    private static final class Result {
+        boolean ok, fatal;
+        String error = "";
+        Uri uri;
+        long size;
+        String name;
+    }
+
+    private static void runAll(Context ctx, int id, List<String> candidates) {
+        long started = SystemClock.elapsedRealtime();
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        String lastError = "no link worked";
+        int tried = 0;
+        for (String url : candidates) {
+            if (tried >= 4) break;
+            tried++;
+            boolean video = Scan.isVideo(url);
+            for (int attempt = 0; attempt < 2; attempt++) {
+                Result r = fetch(ctx, id, url, video, "IGMod_" + stamp + (video ? ".mp4" : ".jpg"));
+                if (r.ok) {
+                    finish(ctx, id, r, video, video ? Scan.describe(url) : "photo", started);
+                    return;
                 }
-                Thread.sleep(500);
+                lastError = r.error;
+                if (r.fatal) break; // 4xx / not an mp4: retrying the same link is pointless
             }
-        } catch (Throwable ignored) {
+        }
+        cancelProgress(ctx, id);
+        String msg = lastError + " (tried " + tried + " link" + (tried == 1 ? "" : "s") + ")";
+        notify(ctx, id, "Download failed", msg, null, false);
+        toastMain(ctx, "Download failed: " + msg);
+    }
+
+    private static Result fail(String error, boolean fatal) {
+        Result r = new Result();
+        r.error = error;
+        r.fatal = fatal;
+        return r;
+    }
+
+    private static Result fetch(Context ctx, int id, String url, boolean video, String name) {
+        HttpURLConnection c = null;
+        Uri uri = null;
+        ContentResolver cr = ctx.getContentResolver();
+        try {
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(20000);
+            c.setReadTimeout(30000);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", UA);
+            c.setRequestProperty("Accept", "*/*");
+            c.setRequestProperty("Accept-Encoding", "identity");
+            int code = c.getResponseCode();
+            if (code != 200 && code != 206) return fail("HTTP " + code, code >= 400 && code < 500);
+            String type = c.getContentType();
+            long total = c.getContentLengthLong();
+            InputStream in = new BufferedInputStream(c.getInputStream(), 1 << 16);
+            byte[] head = new byte[12];
+            int hn = 0;
+            while (hn < head.length) {
+                int r = in.read(head, hn, head.length - hn);
+                if (r < 0) break;
+                hn += r;
+            }
+            if (video && !(hn >= 12 && head[4] == 'f' && head[5] == 't' && head[6] == 'y' && head[7] == 'p')) {
+                return fail("link is not an mp4 (" + type + ")", true);
+            }
+            if (hn < 12) return fail("empty response", false);
+
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, video ? "video/mp4" : "image/jpeg");
+            cv.put(MediaStore.MediaColumns.RELATIVE_PATH, (video ? "Movies" : "Pictures") + "/InstagramMod");
+            cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            uri = cr.insert(video ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI : MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) return fail("could not create the file in MediaStore", false);
+            OutputStream out = cr.openOutputStream(uri, "w");
+            long done = 0, lastUi = 0;
+            byte[] buf = new byte[1 << 16];
+            out.write(head, 0, hn);
+            done += hn;
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                out.write(buf, 0, n);
+                done += n;
+                long now = SystemClock.elapsedRealtime();
+                if (now - lastUi > 400) {
+                    lastUi = now;
+                    progress(ctx, id, name, done, total);
+                }
+            }
+            out.flush();
+            out.close();
+            if (total > 0 && done < total) {
+                cr.delete(uri, null, null);
+                return fail("connection dropped at " + (done * 100 / total) + "%", false);
+            }
+            ContentValues ready = new ContentValues();
+            ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            cr.update(uri, ready, null, null);
+            Result ok = new Result();
+            ok.ok = true;
+            ok.uri = uri;
+            ok.size = done;
+            ok.name = name;
+            return ok;
+        } catch (Throwable t) {
+            if (uri != null) {
+                try {
+                    cr.delete(uri, null, null);
+                } catch (Throwable ignored) {
+                }
+            }
+            String m = t.getMessage();
+            return fail(t.getClass().getSimpleName() + (m == null ? "" : ": " + m), false);
+        } finally {
+            if (c != null) c.disconnect();
         }
     }
+
+    // ------------------------------------------------------------------ UI
 
     private static String clock(long ms) {
         long s = Math.round(ms / 1000.0);
@@ -162,30 +245,18 @@ final class Downloader {
         });
     }
 
-    private static void done(final Context ctx, final long id, final String name, final boolean video, final String quality,
-                             final long started, final long size, final Uri dmUri) {
-        // The gallery only lists the file once MediaStore knows it. Without this it showed up hours later.
-        final File file = new File(Environment.getExternalStoragePublicDirectory(
-                video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES), "InstagramMod/" + name);
-        MediaScannerConnection.scanFile(ctx, new String[]{file.getAbsolutePath()},
-                new String[]{video ? "video/mp4" : "image/jpeg"}, new MediaScannerConnection.OnScanCompletedListener() {
-                    @Override
-                    public void onScanCompleted(String path, Uri scanned) {
-                        finish(ctx, id, name, video, quality, started, size, scanned != null ? scanned : dmUri);
-                    }
-                });
-    }
-
-    private static void finish(Context ctx, long id, String name, boolean video, String quality, long started, long size, Uri uri) {
+    private static void finish(Context ctx, int id, Result r, boolean video, String quality, long started) {
+        cancelProgress(ctx, id);
         StringBuilder sb = new StringBuilder();
-        sb.append(video ? "Video" : "Photo").append(" saved to ").append(video ? "Movies" : "Pictures").append("/InstagramMod (in Gallery now)");
+        sb.append(video ? "Video" : "Photo").append(" saved to ").append(video ? "Movies" : "Pictures")
+                .append("/InstagramMod (already in Gallery)");
         sb.append("\n").append(quality);
-        if (size > 0) sb.append(" | ").append(String.format(Locale.US, "%.1f MB", size / 1048576.0));
+        sb.append(" | ").append(String.format(Locale.US, "%.1f MB", r.size / 1048576.0));
         sb.append(" | took ").append(Math.max(1, (SystemClock.elapsedRealtime() - started) / 1000)).append("s");
-        if (video && uri != null) {
+        if (video) {
             MediaMetadataRetriever m = new MediaMetadataRetriever();
             try {
-                m.setDataSource(ctx, uri);
+                m.setDataSource(ctx, r.uri);
                 String dur = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
                 String audio = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO);
                 String w = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
@@ -201,20 +272,43 @@ final class Downloader {
                 }
             }
         }
-        Intent open = null;
-        if (uri != null) {
-            open = new Intent(Intent.ACTION_VIEW);
-            open.setDataAndType(uri, video ? "video/mp4" : "image/jpeg");
-            open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent open = new Intent(Intent.ACTION_VIEW);
+        open.setDataAndType(r.uri, video ? "video/mp4" : "image/jpeg");
+        open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        notify(ctx, id, "Saved: " + r.name, sb.toString(), open, true);
+        toastMain(ctx, sb.toString());
+    }
+
+    private static NotificationManager manager(Context ctx) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Mod downloads", NotificationManager.IMPORTANCE_DEFAULT));
+        return nm;
+    }
+
+    private static void progress(Context ctx, int id, String name, long done, long total) {
+        try {
+            Notification.Builder b = new Notification.Builder(ctx, CHANNEL)
+                    .setSmallIcon(android.R.drawable.stat_sys_download)
+                    .setContentTitle("Downloading " + name)
+                    .setContentText(total > 0 ? (done * 100 / total) + "%  -  " + String.format(Locale.US, "%.1f / %.1f MB", done / 1048576.0, total / 1048576.0)
+                            : String.format(Locale.US, "%.1f MB", done / 1048576.0))
+                    .setOnlyAlertOnce(true)
+                    .setOngoing(true)
+                    .setProgress(100, total > 0 ? (int) (done * 100 / total) : 0, total <= 0);
+            manager(ctx).notify(200000 + id, b.build());
+        } catch (Throwable ignored) {
         }
-        notify(ctx, (int) id, "Saved: " + name, sb.toString(), open, true);
-        toastMain(ctx, sb.toString()); // visible even if notifications are muted for this app
+    }
+
+    private static void cancelProgress(Context ctx, int id) {
+        try {
+            manager(ctx).cancel(200000 + id);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void notify(Context ctx, int id, String title, String text, Intent open, boolean ok) {
         try {
-            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
-            nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Mod downloads", NotificationManager.IMPORTANCE_DEFAULT));
             Notification.Builder b = new Notification.Builder(ctx, CHANNEL)
                     .setSmallIcon(ok ? android.R.drawable.stat_sys_download_done : android.R.drawable.stat_notify_error)
                     .setContentTitle(title)
@@ -224,7 +318,7 @@ final class Downloader {
             if (open != null) {
                 b.setContentIntent(PendingIntent.getActivity(ctx, id, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
             }
-            nm.notify(100000 + id, b.build());
+            manager(ctx).notify(100000 + id, b.build());
         } catch (Throwable ignored) {
         }
     }

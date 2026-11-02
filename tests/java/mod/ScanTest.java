@@ -48,6 +48,14 @@ public class ScanTest {
         check("photo: largest image", Scan.pick(Arrays.asList(thumb, img)).equals(img));
         check("quality described", Scan.describe(hi).equals("1080p progressive"));
 
+        List<String> c = Scan.candidates(urls, true);
+        check("video post: candidates are videos only, best first", c.size() == 2 && c.get(0).equals(hi) && c.get(1).equals(low));
+        List<String> c2 = Scan.candidates(urls, false);
+        check("photo post: videos first, then images by size", c2.size() == 4 && c2.get(2).equals(img));
+        check("video expected but only a photo known -> nothing (no thumbnail download)",
+                Scan.candidates(Arrays.asList(img, thumb), true).isEmpty());
+        check("audio-only never a candidate", Scan.candidates(Arrays.asList(aud), true).isEmpty());
+
         Media organic = new Media();
         check("organic media has no ad signal", Scan.adSignal(organic) == null);
         organic.adAction = "none";

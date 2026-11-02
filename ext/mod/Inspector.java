@@ -144,18 +144,13 @@ final class Inspector {
             sb.append("list ").append(listNo++).append(": ").append(rv.getClass().getName())
                     .append(" #").append(idName(rv)).append(" [").append(rv.getWidth()).append('x').append(rv.getHeight()).append("]\n");
             for (UiScanner.Row row : UiScanner.rowsOf(rv)) {
-                Object media = null;
-                try {
-                    Method m = rv.getClass().getMethod("getChildViewHolder", View.class);
-                    media = Scan.findMedia(m.invoke(rv, row.v), 4);
-                } catch (Throwable ignored) {
-                }
-                if (media == null) media = Scan.findMediaInViewTags(row.v, 250);
+                Object[] found = UiScanner.mediaWithSource(rv, row.v, row.pos);
+                Object media = found[0];
                 if (firstMedia == null && media != null && row.v.isShown()) firstMedia = media;
                 sb.append("  pos ").append(row.pos).append(" ").append(row.v.getClass().getSimpleName())
                         .append(" h=").append(row.v.getHeight())
                         .append(" adMarker=").append(UiScanner.hasAdMarker(row.v))
-                        .append(" media=").append(media != null)
+                        .append(" media=").append(media != null).append(" via ").append(found[1])
                         .append(" adSignal=").append(media == null ? "-" : String.valueOf(Scan.adSignal(media)))
                         .append(" urls=").append(media == null ? 0 : Scan.urls(media).size()).append('\n');
             }
@@ -164,7 +159,12 @@ final class Inspector {
 
         if (firstMedia != null) {
             sb.append("\n== first visible Media: urls ==\n");
-            for (String u : Scan.urls(firstMedia)) sb.append(u.length() > 160 ? u.substring(0, 160) + "..." : u).append('\n');
+            List<String> all = Scan.urls(firstMedia);
+            for (String u : all) sb.append(u.length() > 160 ? u.substring(0, 160) + "..." : u).append('\n');
+            sb.append("\n== download candidates (video expected), best first ==\n");
+            for (String u : Scan.candidates(all, true)) {
+                sb.append(Scan.describe(u)).append("  ").append(u.length() > 110 ? u.substring(0, 110) + "..." : u).append('\n');
+            }
             sb.append("\n== first visible Media: fields (depth 2) ==\n");
             fields(firstMedia, 0, 2, sb, new java.util.IdentityHashMap<Object, Boolean>());
         }

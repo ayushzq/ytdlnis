@@ -232,6 +232,26 @@ class PatchTests(unittest.TestCase):
             with zipfile.ZipFile(out) as z:
                 self.assertIn("classes11.dex", z.namelist())
 
+    def test_reels_ad_gap_rule(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            f = root / "smali_classes2/com/ig/Gap.smali"
+            f.write_text(".class public LX/0REP;\n.super Ljava/lang/Object;\n\n"
+                         ".method public A04(LX/07ds;I)Z\n    .locals 3\n"
+                         '    const-string v0, "sponsored_item_meets_min_gap_current_position_less_than_zero maxSeenPosition: "\n'
+                         "    const/4 v1, 0x1\n    return v1\n.end method\n")
+            patch = REGISTRY["block_ads"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            res = patch.apply(root, cands, Options())
+            rule = [r for r in res.rules if r.rule_id == "reels_ad_insertion_gap"][0]
+            self.assertEqual((rule.status, len(rule.hits)), ("applied", 1))
+            text = f.read_text()
+            self.assertIn("invoke-static {}, Lmod/Hooks;->ads()Z", text)
+            self.assertIn("const/4 v0, 0x0\n    return v0\n    :ghost_go_reels_ad_insertion_gap", text)
+            self.assertIn("const/4 v1, 0x1", text)  # original body kept behind the guard
+            patch.apply(root, cands, Options())
+            self.assertEqual(f.read_text(), text)  # idempotent
+
     def test_rewrite_is_idempotent(self):
         with tempfile.TemporaryDirectory() as t:
             root = make_tree(Path(t))

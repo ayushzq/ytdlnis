@@ -32,11 +32,14 @@ import java.util.Set;
 import java.util.WeakHashMap;
 
 /**
- * Screen-level features that do not depend on obfuscated code. Learned from a real dump of the feed:
- *  - the feed is built with Litho: "Ad" is a ComponentHost with contentDescription "Ad", the photo has
- *    contentDescription "Sponsored Photo by ...", and ONE post = several RecyclerView rows
- *    (row_feed_profile_header, media, CTA, buttons, caption) -> an ad is hidden as a whole group;
- *  - lists are nested (pager RecyclerView -> MainFeedRecyclerView), so only "leaf" lists are scanned.
+ * Screen-level features that do not depend on obfuscated code. Learned from real dumps:
+ *  - the feed is Litho: "Ad" is a ComponentHost with contentDescription "Ad", the photo has
+ *    contentDescription "Sponsored Photo by ...", one post = several RecyclerView rows (header, media,
+ *    CTA, buttons, caption) -> an ad is hidden as a whole group;
+ *  - lists are nested (pager RecyclerView -> MainFeedRecyclerView): only "leaf" lists are scanned;
+ *  - Reels live in a ViewPager2 (pages must stay match_parent, so an ad page is swiped past);
+ *  - Instagram's action icons are Litho hosts (no foreign children), so the download icon is put into the
+ *    nearest plain FrameLayout around them: inside the page, moving with it, under dialogs.
  */
 final class UiScanner {
     private static final String TAG_DL = "igmod_dl";
@@ -50,17 +53,14 @@ final class UiScanner {
     private static final WeakHashMap<ViewGroup, Set<Integer>> AD_POS = new WeakHashMap<>();
     private static final WeakHashMap<ViewGroup, Boolean> FEED_RV = new WeakHashMap<>();
     private static final WeakHashMap<ViewGroup, Integer> LAST_COUNT = new WeakHashMap<>();
-    /** pager -> page index seen on the previous pass (to know which way the user is swiping) */
     private static final WeakHashMap<ViewGroup, Integer> LAST_PAGE = new WeakHashMap<>();
-    /** ad pages inside a ViewPager2: made transparent (never resized - ViewPager2 crashes on that) */
-    private static final WeakHashMap<View, Integer> ALPHA_HIDDEN = new WeakHashMap<>();
-    private static final WeakHashMap<View, Integer> SKIPPED = new WeakHashMap<>();
+    private static final WeakHashMap<View, PageState> PAGES = new WeakHashMap<>();
     private static final Map<Integer, String> ID_NAMES = new HashMap<>();
+    private static final Map<Class<?>, Method> POS_METHODS = new HashMap<>();
     /** row -> adapter position it was judged an ad at (Media carries ad_action / ad_metadata) */
     private static final WeakHashMap<View, Integer> MEDIA_AD = new WeakHashMap<>();
     /** row -> {position, media, timestamp}: avoids re-walking object graphs every pass */
     private static final WeakHashMap<View, Object[]> ROW_MEDIA = new WeakHashMap<>();
-    private static final Map<Class<?>, Method> POS_METHODS = new HashMap<>();
 
     private static final int FEED = 0, REEL = 1, SINGLE = 2;
 
@@ -69,9 +69,18 @@ final class UiScanner {
         int pos;
     }
 
+    /** An ad page inside a ViewPager2: hidden by alpha only, swiped past, never resized. */
+    private static final class PageState {
+        int pos;
+        long since, lastTry;
+        int tries;
+        boolean gaveUp;
+    }
+
     private static final class Btn {
         View row;
         ViewGroup rv;
+        ViewGroup host;
         int pos;
         int kind;
         View mediaView;
@@ -193,6 +202,19 @@ final class UiScanner {
         return false;
     }
 
+    private static boolean plainFrame(Object o) {
+        return o instanceof FrameLayout && !o.getClass().getName().startsWith("com.facebook.litho");
+    }
+
+    /** Nearest plain FrameLayout above `from` (not Litho hosts, which do not lay out foreign children). */
+    private static ViewGroup frameAbove(View from, View stopAt) {
+        for (android.view.ViewParent p = from.getParent(); p != null; p = p.getParent()) {
+            if (plainFrame(p)) return (ViewGroup) p;
+            if (p == stopAt) break;
+        }
+        return null;
+    }
+
     private static void collectAll(View v, List<ViewGroup> out, int[] budget) {
         if (v == null || budget[0]-- <= 0) return;
         if (v instanceof ViewGroup) {
@@ -239,9 +261,9 @@ final class UiScanner {
         }
     }
 
-    private static void goToPage(ViewGroup pager, int page) {
+    private static void goToPage(ViewGroup pager, int page, boolean smooth) {
         try {
-            pager.getClass().getMethod("setCurrentItem", int.class, boolean.class).invoke(pager, page, true);
+            pager.getClass().getMethod("setCurrentItem", int.class, boolean.class).invoke(pager, page, smooth);
         } catch (Throwable ignored) {
         }
     }
@@ -286,6 +308,44 @@ final class UiScanner {
         return rows;
     }
 
+    // ---------------------------------------------------------------- finding the Media of a row
+
+    /** {media, source} where source says which strategy found it (shown by Inspect). */
+    static Object[] mediaWithSource(ViewGroup rv, View row, int pos) {
+        try {
+            Method m = rv.getClass().getMethod("getChildViewHolder", View.class);
+            Object media = Scan.findMedia(m.invoke(rv, row), 5, 1500);
+            if (media != null) return new Object[]{media, "holder"};
+        } catch (Throwable ignored) {
+        }
+        Object media = Scan.findMediaInViewTags(row, 250);
+        if (media != null) return new Object[]{media, "view-tags"};
+        try {
+            Object adapter = rv.getClass().getMethod("getAdapter").invoke(rv);
+            media = Scan.mediaFromAdapter(adapter, pos);
+            if (media != null) return new Object[]{media, "adapter[" + pos + "]"};
+        } catch (Throwable ignored) {
+        }
+        return new Object[]{null, "none"};
+    }
+
+    private static Object mediaOf(ViewGroup rv, View row, int pos) {
+        return mediaWithSource(rv, row, pos)[0];
+    }
+
+    /** Media of a row, cached briefly (finding it walks an object graph). */
+    private static Object cachedMedia(ViewGroup rv, View row, int pos) {
+        Object[] c = ROW_MEDIA.get(row);
+        long now = SystemClock.uptimeMillis();
+        if (c != null && (Integer) c[0] == pos && now - (Long) c[2] < 1500) {
+            Object m = ((java.lang.ref.WeakReference<?>) c[1]).get();
+            if (m != null) return m;
+        }
+        Object m = mediaOf(rv, row, pos);
+        if (m != null) ROW_MEDIA.put(row, new Object[]{pos, new java.lang.ref.WeakReference<Object>(m), now});
+        return m;
+    }
+
     // ---------------------------------------------------------------- ads
 
     /** True if the subtree carries one of Instagram's ad markers. */
@@ -314,11 +374,6 @@ final class UiScanner {
             }
         }
         return false;
-    }
-
-    /** Kept for the inspector: does this row (or part of an ad post) look like an ad? */
-    static boolean isAdRow(View row) {
-        return hasAdMarker(row);
     }
 
     private static boolean adPass(State s) {
@@ -354,29 +409,8 @@ final class UiScanner {
             }
             boolean[] ads = AdLogic.decide(pos, header, marker, adPos, feed);
             ViewGroup pager = pagerOf(rv);
-            if (pager != null) { // Reels: never resize pages, make the ad transparent and swipe past it
-                int cur = currentPage(pager);
-                Integer prev = LAST_PAGE.get(pager);
-                for (int i = 0; i < n; i++) {
-                    View row = list.get(i).v;
-                    boolean ad = ads[i] && hide;
-                    if (ad) {
-                        if (row.getAlpha() != 0f) {
-                            row.setAlpha(0f);
-                            ALPHA_HIDDEN.put(row, pos[i]);
-                        }
-                        Integer done = SKIPPED.get(row);
-                        if (cur == pos[i] && (done == null || done != pos[i])) {
-                            SKIPPED.put(row, pos[i]);
-                            goToPage(pager, prev != null && prev > cur ? cur - 1 : cur + 1);
-                            Hooks.bump(4);
-                        }
-                    } else if (ALPHA_HIDDEN.containsKey(row)) {
-                        ALPHA_HIDDEN.remove(row);
-                        row.setAlpha(1f);
-                    }
-                }
-                if (cur >= 0) LAST_PAGE.put(pager, cur);
+            if (pager != null) {
+                pagerAds(pager, list, pos, ads, hide);
                 continue;
             }
             for (int i = 0; i < n; i++) {
@@ -409,6 +443,53 @@ final class UiScanner {
         return changed;
     }
 
+    /**
+     * Reels (ViewPager2). The ad page is made transparent and the pager is moved to the next page (or
+     * the previous one if the user is swiping back). Retried with a non-animated jump; if it still
+     * cannot move after ~3.5 s the ad is shown again rather than leaving a blank screen.
+     */
+    private static void pagerAds(ViewGroup pager, List<Row> list, int[] pos, boolean[] ads, boolean hide) {
+        int cur = currentPage(pager);
+        Integer prev = LAST_PAGE.get(pager);
+        long now = SystemClock.uptimeMillis();
+        for (int i = 0; i < list.size(); i++) {
+            View row = list.get(i).v;
+            PageState st = PAGES.get(row);
+            if (st != null && st.pos != pos[i]) { // page was recycled for another item
+                PAGES.remove(row);
+                st = null;
+                row.setAlpha(1f);
+            }
+            boolean ad = ads[i] && hide && (st == null || !st.gaveUp);
+            if (!ad) {
+                if (st != null && !st.gaveUp) PAGES.remove(row);
+                if (row.getAlpha() == 0f) row.setAlpha(1f);
+                continue;
+            }
+            if (st == null) {
+                st = new PageState();
+                st.pos = pos[i];
+                st.since = now;
+                PAGES.put(row, st);
+                Hooks.bump(4);
+            }
+            row.setAlpha(0f);
+            if (cur == pos[i]) {
+                if (st.tries < 3 && now - st.lastTry >= 700) {
+                    st.tries++;
+                    st.lastTry = now;
+                    int target = prev != null && prev > cur ? cur - 1 : cur + 1;
+                    if (target < 0) target = cur + 1;
+                    goToPage(pager, target, st.tries == 1);
+                } else if (st.tries >= 3 && now - st.since > 3500) {
+                    st.gaveUp = true; // never leave the user on a blank page
+                    row.setAlpha(1f);
+                }
+            }
+        }
+        if (cur >= 0) LAST_PAGE.put(pager, cur);
+    }
+
     // ---------------------------------------------------------------- download buttons (slow pass)
 
     private static float visibleFraction(View v) {
@@ -439,29 +520,6 @@ final class UiScanner {
             }
         }
         return best;
-    }
-
-    private static Object mediaForRow(ViewGroup rv, View row) {
-        try {
-            Method m = rv.getClass().getMethod("getChildViewHolder", View.class);
-            Object media = Scan.findMedia(m.invoke(rv, row), 4);
-            if (media != null) return media;
-        } catch (Throwable ignored) {
-        }
-        return Scan.findMediaInViewTags(row, 250);
-    }
-
-    /** Media of a row, cached briefly (finding it walks an object graph). */
-    private static Object cachedMedia(ViewGroup rv, View row, int pos) {
-        Object[] c = ROW_MEDIA.get(row);
-        long now = SystemClock.uptimeMillis();
-        if (c != null && (Integer) c[0] == pos && now - (Long) c[2] < 1500) {
-            Object m = ((java.lang.ref.WeakReference<?>) c[1]).get();
-            if (m != null) return m;
-        }
-        Object m = mediaForRow(rv, row);
-        if (m != null) ROW_MEDIA.put(row, new Object[]{pos, new java.lang.ref.WeakReference<Object>(m), now});
-        return m;
     }
 
     private static boolean storyViewerPresent(View root) {
@@ -508,25 +566,31 @@ final class UiScanner {
                     }
                 }
                 Integer mAd = MEDIA_AD.get(row);
-                boolean isAd = hide && ((mAd != null && mAd == r.pos) || ALPHA_HIDDEN.containsKey(row));
+                PageState ps = PAGES.get(row);
+                boolean isAd = hide && ((mAd != null && mAd == r.pos) || (ps != null && !ps.gaveUp));
                 if (!dl || isAd || visibleFraction(row) < 0.30f) continue;
                 rows++;
                 alive.add(row);
+                View anchor = reel ? findByIdName(row, "like_button") : findFeedSave(list, idx);
+                ViewGroup host = reel ? frameAbove(anchor != null ? anchor : row, row) : frameAbove(rv, null);
+                if (host == null) host = reel && plainFrame(row) ? (ViewGroup) row : s.root;
                 Btn b = s.buttons.get(row);
                 if (b == null) {
-                    b = newButton(s, row, reel ? REEL : FEED);
+                    b = newButton(s, row, reel ? REEL : FEED, host);
                     s.buttons.put(row, b);
+                } else {
+                    moveTo(b, host);
                 }
                 b.rv = rv;
                 b.pos = r.pos;
                 b.mediaView = big;
-                b.anchor = reel ? findByIdName(row, "like_button") : findFeedSave(list, idx);
+                b.anchor = anchor;
             }
         }
         for (Iterator<Map.Entry<View, Btn>> it = s.buttons.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<View, Btn> e = it.next();
             if (!dl || !alive.contains(e.getKey())) {
-                s.root.removeView(e.getValue().view);
+                detach(e.getValue());
                 it.remove();
             }
         }
@@ -541,14 +605,17 @@ final class UiScanner {
             boolean viewer = big != null && area(big) >= 0.45f * area(s.root)
                     && (storyViewerPresent(s.root) || Scan.findMediaInViewTags(s.root, 1200) != null);
             if (viewer) {
-                if (s.single == null) s.single = newButton(s, s.root, SINGLE);
+                ViewGroup host = frameAbove(big, null);
+                if (host == null) host = s.root;
+                if (s.single == null) s.single = newButton(s, s.root, SINGLE, host);
+                else moveTo(s.single, host);
                 s.single.mediaView = big;
             } else if (s.single != null) {
-                s.root.removeView(s.single.view);
+                detach(s.single);
                 s.single = null;
             }
         } else if (s.single != null) {
-            s.root.removeView(s.single.view);
+            detach(s.single);
             s.single = null;
         }
     }
@@ -563,12 +630,27 @@ final class UiScanner {
     }
 
     private static void clearButtons(State s) {
-        for (Btn b : s.buttons.values()) s.root.removeView(b.view);
+        for (Btn b : s.buttons.values()) detach(b);
         s.buttons.clear();
         if (s.single != null) {
-            s.root.removeView(s.single.view);
+            detach(s.single);
             s.single = null;
         }
+    }
+
+    private static void detach(Btn b) {
+        try {
+            if (b.view.getParent() instanceof ViewGroup) ((ViewGroup) b.view.getParent()).removeView(b.view);
+        } catch (Throwable ignored) {
+        }
+        b.host = null;
+    }
+
+    private static void moveTo(Btn b, ViewGroup host) {
+        if (b.host == host && b.view.getParent() == host) return;
+        detach(b);
+        b.host = host;
+        host.addView(b.view);
     }
 
     private static boolean lightTheme(Activity a) {
@@ -576,11 +658,14 @@ final class UiScanner {
                 != Configuration.UI_MODE_NIGHT_YES;
     }
 
-    private static Btn newButton(final State s, final View row, final int kind) {
+    private static boolean expectsVideo(Btn b) {
+        return b.kind == REEL || b.mediaView instanceof android.view.TextureView || b.mediaView instanceof android.view.SurfaceView;
+    }
+
+    private static Btn newButton(final State s, final View row, final int kind, ViewGroup host) {
         final Btn b = new Btn();
         b.row = row;
         b.kind = kind;
-        // light theme feed icons are dark; Reels / stories are always on dark media -> white
         DlIconView t = new DlIconView(s.a, kind == FEED && lightTheme(s.a));
         t.setTag(TAG_DL);
         int size = Math.round(44 * s.a.getResources().getDisplayMetrics().density);
@@ -592,14 +677,18 @@ final class UiScanner {
                 Downloader.download(s.a, new Downloader.Source() {
                     @Override
                     public Object get() {
-                        if (b.kind == SINGLE) return Scan.findMediaInViewTags(s.root, 2500);
-                        return b.rv != null ? mediaForRow(b.rv, b.row) : Scan.findMediaInViewTags(b.row, 250);
+                        if (b.kind == SINGLE) {
+                            Object m = Scan.findMediaInViewTags(s.root, 2500);
+                            return m != null ? m : Scan.mediaFromFragments(s.a);
+                        }
+                        if (b.rv == null) return Scan.findMediaInViewTags(b.row, 250);
+                        return mediaOf(b.rv, b.row, adapterPosition(b.rv, b.row, b.pos));
                     }
-                });
+                }, expectsVideo(b));
             }
         });
         b.view = t;
-        s.root.addView(t);
+        moveTo(b, host);
         return b;
     }
 
@@ -618,11 +707,21 @@ final class UiScanner {
         }
     }
 
+    private static void hideBtn(Btn b) {
+        b.view.setVisibility(View.INVISIBLE);
+    }
+
+    /** All coordinates are relative to the host the button lives in. */
     private static void place(State s, Btn b) {
+        ViewGroup host = b.host;
+        if (host == null || !host.isShown() || !b.row.isShown()) {
+            hideBtn(b);
+            return;
+        }
         float d = s.a.getResources().getDisplayMetrics().density;
         int size = b.view.getLayoutParams().width;
         int[] o = new int[2];
-        s.root.getLocationOnScreen(o);
+        host.getLocationOnScreen(o);
         float x, y;
         View anchor = b.anchor;
         boolean anchored = anchor != null && anchor.isAttachedToWindow() && anchor.isShown() && anchor.getWidth() > 0;
@@ -630,20 +729,17 @@ final class UiScanner {
             View ref = b.mediaView != null ? b.mediaView : b.row;
             Rect vis = new Rect();
             if (!ref.isShown() || !ref.getGlobalVisibleRect(vis)) {
-                b.view.setVisibility(View.INVISIBLE);
+                hideBtn(b);
                 return;
             }
             x = vis.right - o[0] - size - 6 * d;
             y = vis.top - o[1] + 0.38f * vis.height();
             setIcon(b, false);
-        } else if (!b.row.isShown()) {
-            b.view.setVisibility(View.INVISIBLE);
-            return;
         } else if (!anchored) { // Instagram's own icon not found: float over the media instead
             View ref = b.mediaView != null ? b.mediaView : b.row;
             Rect vis = new Rect();
             if (!ref.isShown() || !ref.getGlobalVisibleRect(vis)) {
-                b.view.setVisibility(View.INVISIBLE);
+                hideBtn(b);
                 return;
             }
             if (b.kind == REEL) {
@@ -667,8 +763,8 @@ final class UiScanner {
                 setIcon(b, lightTheme(s.a));
             }
         }
-        if (y < 0 || y + size > s.root.getHeight()) {
-            b.view.setVisibility(View.INVISIBLE);
+        if (y < 0 || y + size > host.getHeight()) {
+            hideBtn(b);
             return;
         }
         b.view.setTranslationX(x);
