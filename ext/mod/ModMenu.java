@@ -43,8 +43,8 @@ final class ModMenu {
             for (int i = 0; i < Hooks.KEYS.length; i++) {
                 final int idx = i;
                 final Switch sw = new Switch(ctx);
-                int installed = BuildInfo.HOOKS[i];
-                String state = installed == 0 ? "NOT in this build" : installed + " hook(s)";
+                int installed = i < BuildInfo.HOOKS.length ? BuildInfo.HOOKS[i] : -1;
+                String state = installed < 0 ? "built-in" : installed == 0 ? "NOT in this build" : installed + " hook(s)";
                 sw.setText(Hooks.LABELS[i] + "\n" + state + "  |  blocked " + Hooks.hits(i) + "x");
                 sw.setChecked(Hooks.isOn(i));
                 sw.setPadding(0, dp(ctx, 10), 0, dp(ctx, 10));
@@ -73,6 +73,25 @@ final class ModMenu {
                 }
             });
             root.addView(dev);
+
+            Button inspect = new Button(ctx);
+            inspect.setText("Inspect screen (debug dump)");
+            inspect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    final android.net.Uri uri = Inspector.dumpToDownloads(a);
+                    if (uri == null) {
+                        Toast.makeText(a, "Could not save the dump", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    Toast.makeText(a, "Saved to Downloads (igmod-inspect-*.txt)", Toast.LENGTH_LONG).show();
+                    try {
+                        Inspector.share(a, uri);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+            root.addView(inspect);
 
             TextView info = new TextView(ctx);
             info.setText("\nPatched in this build:\n" + BuildInfo.SUMMARY);

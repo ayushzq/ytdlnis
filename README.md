@@ -12,6 +12,7 @@ stock APK ──apktool d──▶ smali ──python patcher──▶ patched s
 | `developer_options` | Forces the employee / internal gates to `true` so the internal **Developer Options / MobileConfig** menu becomes reachable. |
 | `ghost_mode` | Hides **story seen**, **DM seen** and the **typing indicator** (also available separately: `ghost_story_seen`, `ghost_dm_seen`, `ghost_typing`). |
 | `mod_menu` | Adds a small draggable **M** button on every screen. Tap it for toggles (story seen, DM seen, typing, ads), per-feature *"blocked N×"* counters (proof that a patch really fires), a list of what was patched in the build, and an **Open Developer Options** shortcut. |
+| `mod_menu` (screen features) | Also hides feed/reels rows labelled **Ad / Sponsored** (collapsed on screen, independent of Instagram's obfuscation), adds a **↓ download button** on every visible post/reel (and the story viewer) that saves the photo/video to `Pictures|Movies/InstagramMod`, and an **Inspect screen** tool that writes a debug dump (`Download/igmod-inspect-*.txt`) for tuning. |
 | `block_ads` | Neutralises ad-injection endpoints and ad-loading feature flags for sponsored content. |
 
 > **Read this first - patches are best-effort.** Instagram's code is obfuscated and changes every release.

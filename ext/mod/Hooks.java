@@ -20,12 +20,14 @@ import android.widget.TextView;
  */
 public final class Hooks {
     static final String PREFS = "igmod_prefs";
-    static final String[] KEYS = {"story", "dm", "typing", "ads"};
-    static final String[] LABELS = {"Hide story seen", "Hide DM seen", "Hide typing indicator", "Block ads"};
+    static final String[] KEYS = {"story", "dm", "typing", "ads", "uiads", "dl"};
+    static final String[] LABELS = {
+        "Hide story seen", "Hide DM seen", "Hide typing indicator", "Block ads (network)",
+        "Hide ad posts (on screen)", "Download buttons"};
     private static final String TAG = "igmod_button";
 
-    private static final boolean[] ON = {true, true, true, true};
-    private static final int[] HITS = new int[4];
+    private static final boolean[] ON = {true, true, true, true, true, true};
+    private static final int[] HITS = new int[6];
     private static volatile boolean loaded;
 
     private Hooks() {}
@@ -56,6 +58,9 @@ public final class Hooks {
     }
 
     static boolean isOn(int i) { return ON[i]; }
+
+    /** Count an event of a screen-level feature (ui ad hidden, ...). */
+    static void bump(int i) { HITS[i]++; }
 
     static int hits(int i) { return HITS[i]; }
 
@@ -110,8 +115,12 @@ public final class Hooks {
             View content = a.findViewById(android.R.id.content);
             if (!(content instanceof FrameLayout)) return;
             final FrameLayout root = (FrameLayout) content;
-            if (root.findViewWithTag(TAG) != null) return;
-            root.addView(makeButton(a, root));
+            if (root.findViewWithTag(TAG) == null) root.addView(makeButton(a, root));
+        } catch (Throwable ignored) {
+        }
+        try {
+            View content2 = a.findViewById(android.R.id.content);
+            if (content2 instanceof FrameLayout) UiScanner.attach(a, (FrameLayout) content2);
         } catch (Throwable ignored) {
         }
     }
