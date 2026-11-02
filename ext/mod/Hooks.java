@@ -29,6 +29,8 @@ public final class Hooks {
     private static final boolean[] ON = {true, true, true, true, true, true};
     private static final int[] HITS = new int[6];
     private static volatile boolean loaded;
+    /** why the most recent ad was hidden (shown in the menu so false positives are easy to spot) */
+    static volatile String lastAdReason = "-";
 
     private Hooks() {}
 

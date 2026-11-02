@@ -230,6 +230,31 @@ final class Scan {
         return best;
     }
 
+    private static Object call(Object o, String name) {
+        try {
+            return o.getClass().getMethod(name).invoke(o);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Ad fields live on Instagram's own Media object (build 455: A72() = ad_action, A8b() = ad_metadata).
+     * Organic media returns null / empty, ads return values - no "Sponsored" label needed.
+     * Returns a short reason or null.
+     */
+    static String adSignal(Object media) {
+        if (media == null) return null;
+        Object action = call(media, "A72");
+        if (action instanceof String) {
+            String a = ((String) action).trim();
+            if (!a.isEmpty() && !a.equalsIgnoreCase("none") && !a.equalsIgnoreCase("null")) return "ad_action=" + a;
+        }
+        Object meta = call(media, "A8b");
+        if (meta instanceof java.util.Collection && !((java.util.Collection<?>) meta).isEmpty()) return "ad_metadata";
+        return null;
+    }
+
     /** The "vencode_tag" Instagram puts (base64 JSON) in the efg= query parameter, or null. */
     static String encodeTag(String url) {
         try {

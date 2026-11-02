@@ -24,3 +24,15 @@ jobs:
           mkdir -p /tmp/adt
           javac -d /tmp/adt ext/mod/AdLogic.java tests/java/mod/AdLogicTest.java
           java -cp /tmp/adt mod.AdLogicTest
+      - name: Media / URL / ad-signal logic test (needs android.jar from the runner SDK)
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          JAR=""
+          for d in $(ls -d "$SDK"/platforms/android-*/ | sort -V -r); do
+            if [ -f "${d}android.jar" ]; then JAR="${d}android.jar"; break; fi
+          done
+          test -n "$JAR" || { echo "no android.jar"; exit 1; }
+          mkdir -p /tmp/st
+          javac -Xlint:-options -source 8 -target 8 -bootclasspath "$JAR" -d /tmp/st \
+            tests/java/com/instagram/feed/media/Media.java tests/java/obf/Obf.java ext/mod/Scan.java tests/java/mod/ScanTest.java
+          java -cp "/tmp/st:$JAR" mod.ScanTest

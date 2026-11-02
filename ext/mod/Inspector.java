@@ -156,6 +156,7 @@ final class Inspector {
                         .append(" h=").append(row.v.getHeight())
                         .append(" adMarker=").append(UiScanner.hasAdMarker(row.v))
                         .append(" media=").append(media != null)
+                        .append(" adSignal=").append(media == null ? "-" : String.valueOf(Scan.adSignal(media)))
                         .append(" urls=").append(media == null ? 0 : Scan.urls(media).size()).append('\n');
             }
         }

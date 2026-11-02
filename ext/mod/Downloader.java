@@ -10,6 +10,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.media.MediaMetadataRetriever;
+import android.media.MediaScannerConnection;
+import android.os.Handler;
+import android.os.Looper;
+import java.io.File;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.SystemClock;
@@ -30,6 +34,40 @@ final class Downloader {
 
     private Downloader() {}
 
+    /** Resolves the Media lazily: stories / reels bind it a moment after the button is shown. */
+    interface Source {
+        Object get();
+    }
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    static void download(final Activity a, final Source src) {
+        attempt(a, src, 0);
+    }
+
+    private static void attempt(final Activity a, final Source src, final int n) {
+        Object media = null;
+        try {
+            media = src.get();
+        } catch (Throwable ignored) {
+        }
+        if (media != null) {
+            download(a, media);
+            return;
+        }
+        if (n >= 10) {
+            Toast.makeText(a, "No media found for this item (use Inspect screen)", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (n == 0) Toast.makeText(a, "Finding media...", Toast.LENGTH_SHORT).show();
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                attempt(a, src, n + 1);
+            }
+        }, 200);
+    }
+
     static void download(final Activity a, Object media) {
         try {
             if (media == null) {
@@ -48,9 +86,10 @@ final class Downloader {
             final String quality = video ? Scan.describe(url) : "photo";
 
             DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
-            r.setTitle("Downloading " + (video ? "video" : "photo"));
-            r.setDescription(name);
-            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE); // progress while running
+            r.setTitle(name);
+            r.setDescription("Downloading " + (video ? "video" : "photo") + "...");
+            // progress while running, and a "Download complete" entry that stays in the shade afterwards
+            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             r.setDestinationInExternalPublicDir(
                     video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES, "InstagramMod/" + name);
             r.allowScanningByMediaScanner();
@@ -91,6 +130,7 @@ final class Downloader {
                         if (status == DownloadManager.STATUS_FAILED) {
                             int reason = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_REASON));
                             notify(ctx, (int) id, "Download failed", name + " (error " + reason + ")", null, false);
+                            toastMain(ctx, "Download failed (error " + reason + ")");
                             return;
                         }
                     } else {
@@ -110,9 +150,35 @@ final class Downloader {
         return (s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
     }
 
-    private static void done(Context ctx, long id, String name, boolean video, String quality, long started, long size, Uri uri) {
+    private static void toastMain(final Context ctx, final String text) {
+        MAIN.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Toast.makeText(ctx, text, Toast.LENGTH_LONG).show();
+                } catch (Throwable ignored) {
+                }
+            }
+        });
+    }
+
+    private static void done(final Context ctx, final long id, final String name, final boolean video, final String quality,
+                             final long started, final long size, final Uri dmUri) {
+        // The gallery only lists the file once MediaStore knows it. Without this it showed up hours later.
+        final File file = new File(Environment.getExternalStoragePublicDirectory(
+                video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES), "InstagramMod/" + name);
+        MediaScannerConnection.scanFile(ctx, new String[]{file.getAbsolutePath()},
+                new String[]{video ? "video/mp4" : "image/jpeg"}, new MediaScannerConnection.OnScanCompletedListener() {
+                    @Override
+                    public void onScanCompleted(String path, Uri scanned) {
+                        finish(ctx, id, name, video, quality, started, size, scanned != null ? scanned : dmUri);
+                    }
+                });
+    }
+
+    private static void finish(Context ctx, long id, String name, boolean video, String quality, long started, long size, Uri uri) {
         StringBuilder sb = new StringBuilder();
-        sb.append(video ? "Video" : "Photo").append(" saved to ").append(video ? "Movies" : "Pictures").append("/InstagramMod");
+        sb.append(video ? "Video" : "Photo").append(" saved to ").append(video ? "Movies" : "Pictures").append("/InstagramMod (in Gallery now)");
         sb.append("\n").append(quality);
         if (size > 0) sb.append(" | ").append(String.format(Locale.US, "%.1f MB", size / 1048576.0));
         sb.append(" | took ").append(Math.max(1, (SystemClock.elapsedRealtime() - started) / 1000)).append("s");
@@ -141,7 +207,8 @@ final class Downloader {
             open.setDataAndType(uri, video ? "video/mp4" : "image/jpeg");
             open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         }
-        notify(ctx, (int) id, "Download complete", sb.toString(), open, true);
+        notify(ctx, (int) id, "Saved: " + name, sb.toString(), open, true);
+        toastMain(ctx, sb.toString()); // visible even if notifications are muted for this app
     }
 
     private static void notify(Context ctx, int id, String title, String text, Intent open, boolean ok) {

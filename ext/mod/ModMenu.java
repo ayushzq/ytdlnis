@@ -36,7 +36,7 @@ final class ModMenu {
             root.setPadding(pad, dp(ctx, 12), pad, 0);
 
             TextView hint = new TextView(ctx);
-            hint.setText("Counters show how many times a blocked action was intercepted (debug check).");
+            hint.setText("Counters show how many times a blocked action was intercepted (debug check).\nLast ad detected by: " + Hooks.lastAdReason);
             hint.setTextSize(12);
             root.addView(hint);
 
@@ -74,6 +74,21 @@ final class ModMenu {
                 }
             });
             root.addView(dev);
+
+            Button downloads = new Button(ctx);
+            downloads.setText("Open downloads");
+            downloads.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        a.startActivity(new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    } catch (Throwable t) {
+                        Toast.makeText(a, "Open Files > Movies > InstagramMod", Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+            root.addView(downloads);
 
             Button inspect = new Button(ctx);
             inspect.setText("Inspect screen (debug dump)");
