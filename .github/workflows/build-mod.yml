@@ -247,6 +247,7 @@ jobs:
           name: Instagram-Mod-${{ github.run_number }}
           path: dist/*
           retention-days: 14
+          compression-level: 0  # APK is already compressed; a plain "stored" zip opens in every extractor app
 
       - name: Create pre-release
         if: ${{ inputs.create_release }}
