@@ -75,33 +75,32 @@ final class Downloader {
         }, 200);
     }
 
-    static void download(final Activity a, Object media, final boolean expectVideo) {
-        try {
-            final List<String> urls = Scan.urls(media);
-            final List<String> candidates = Scan.candidates(urls, expectVideo);
-            if (candidates.isEmpty()) {
-                Toast.makeText(a, (expectVideo ? "Video link not found" : "Media link not found") + " (" + urls.size()
-                        + " links seen). Use Inspect screen.", Toast.LENGTH_LONG).show();
-                return;
-            }
-            final Context app = a.getApplicationContext();
-            final int id = IDS.getAndIncrement();
-            Hooks.bump(5);
-            String first = candidates.get(0);
-            Toast.makeText(a, "Downloading " + (Scan.isVideo(first) ? "video (" + Scan.describe(first) + ")" : "photo") + "...",
-                    Toast.LENGTH_SHORT).show();
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
+    static void download(final Activity a, final Object media, final boolean expectVideo) {
+        final Context app = a.getApplicationContext();
+        final int id = IDS.getAndIncrement();
+        Hooks.bump(5);
+        Toast.makeText(a, "Preparing download...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<String> urls = Scan.urls(media); // object-graph walk: keep it off the UI thread
+                    List<String> candidates = Scan.candidates(urls, expectVideo);
+                    if (candidates.isEmpty()) {
+                        String msg = (expectVideo ? "Video link not found" : "Media link not found") + " (" + urls.size()
+                                + " links seen). Use Inspect screen.";
+                        Downloader.notify(app, id, "Download failed", msg, null, false);
+                        toastMain(app, msg);
+                        return;
+                    }
+                    String first = candidates.get(0);
+                    toastMain(app, "Downloading " + (Scan.isVideo(first) ? "video (" + Scan.describe(first) + ")" : "photo") + "...");
                     runAll(app, id, candidates);
+                } catch (Throwable t) {
+                    toastMain(app, "Download failed: " + t);
                 }
-            }, "igmod-dl").start();
-        } catch (Throwable t) {
-            try {
-                Toast.makeText(a, "Download failed: " + t, Toast.LENGTH_LONG).show();
-            } catch (Throwable ignored) {
             }
-        }
+        }, "igmod-dl").start();
     }
 
     // ------------------------------------------------------------------ worker

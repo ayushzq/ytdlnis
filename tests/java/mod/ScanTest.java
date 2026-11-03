@@ -56,6 +56,20 @@ public class ScanTest {
                 Scan.candidates(Arrays.asList(img, thumb), true).isEmpty());
         check("audio-only never a candidate", Scan.candidates(Arrays.asList(aud), true).isEmpty());
 
+        // shared cache next to the real data must not leak: 31 profile photos + another post's video
+        Media post = new Media();
+        post.A00 = new Obf.Url("https://scontent.cdninstagram.com/v/t51/p360x360/own_cover.jpg");
+        Media other = new Media();
+        other.A00 = new Obf.Url("https://x.fbcdn.net/o1/v/t2/m86/other_post.mp4?efg=" + efg("xpv_progressive.INSTAGRAM.CLIPS.C3.1080.x"));
+        for (int i = 0; i < 31; i++) post.A01.add(new Obf.Url("https://scontent.cdninstagram.com/v/t51/s150x150/profile" + i + ".jpg"));
+        post.A01.add(other);
+        List<String> own = Scan.urls(post);
+        check("cache of profile photos is ignored", own.size() == 1 && own.get(0).contains("own_cover"));
+        check("another post's video never becomes a candidate", Scan.candidates(own, true).isEmpty());
+        boolean flagged = false;
+        for (String k : Scan.urlsByField(post).keySet()) if (k.startsWith("A01") && k.contains("[list of")) flagged = true;
+        check("provenance flags the oversized list", flagged);
+
         Media organic = new Media();
         check("organic media has no ad signal", Scan.adSignal(organic) == null);
         organic.adAction = "none";

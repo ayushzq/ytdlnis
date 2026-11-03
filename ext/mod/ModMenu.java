@@ -45,7 +45,7 @@ final class ModMenu {
                 final Switch sw = new Switch(ctx);
                 int installed = i < BuildInfo.HOOKS.length ? BuildInfo.HOOKS[i] : -1;
                 String state = installed < 0 ? "built-in" : installed == 0 ? "NOT in this build" : installed + " hook(s)";
-                String verb = i == 4 ? "hidden " : i == 5 ? "downloaded " : "blocked ";
+                String verb = i == 4 ? "hidden " : i == 5 ? "downloaded " : i == 6 ? "gate asked " : "blocked ";
                 sw.setText(Hooks.LABELS[i] + "\n" + state + "  |  " + verb + Hooks.hits(i) + "x");
                 sw.setChecked(Hooks.isOn(i));
                 sw.setPadding(0, dp(ctx, 10), 0, dp(ctx, 10));
@@ -59,7 +59,7 @@ final class ModMenu {
             }
 
             Button dev = new Button(ctx);
-            dev.setText("Open Developer Options");
+            dev.setText("Open Quick Promotion tools");
             dev.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {

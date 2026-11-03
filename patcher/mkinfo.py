@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .patches import REGISTRY
 
-FEATURES = ["story", "dm", "typing", "ads"]
+FEATURES = ["story", "dm", "typing", "ads", "devopt"]  # hook-backed; uiads / dl are built into the extension
 
 
 def feature_of(rule_id: str) -> str:
@@ -32,7 +32,11 @@ def build(report: list[dict], version: str) -> str:
                 hooks[feat] += n
             lines.append(f"{patch['name']}/{r['rule_id']}: {r['status']} ({n})")
     summary = "\\n".join(x.replace("\\", "\\\\").replace('"', '\\"') for x in lines)
-    arr = ", ".join(str(hooks[f]) for f in FEATURES)
+    order = {"story": 0, "dm": 1, "typing": 2, "ads": 3, "devopt": 6}  # index in Hooks.KEYS
+    vals = [-1] * 7  # -1 = built-in (screen features)
+    for f, n in hooks.items():
+        vals[order[f]] = n
+    arr = ", ".join(str(v) for v in vals)
     return (
         "package mod;\n\n"
         "final class BuildInfo {\n"

@@ -20,14 +20,15 @@ import android.widget.TextView;
  */
 public final class Hooks {
     static final String PREFS = "igmod_prefs";
-    static final String[] KEYS = {"story", "dm", "typing", "ads", "uiads", "dl"};
+    static final String[] KEYS = {"story", "dm", "typing", "ads", "uiads", "dl", "devopt"};
     static final String[] LABELS = {
         "Hide story seen", "Hide DM seen", "Hide typing indicator", "Block ads (network)",
-        "Hide ad posts (on screen)", "Download buttons"};
+        "Hide ad posts (on screen)", "Download buttons", "Employee mode (dev options, experimental)"};
+    private static final boolean[] DEFAULTS = {true, true, true, true, true, true, false};
     private static final String TAG = "igmod_button";
 
-    private static final boolean[] ON = {true, true, true, true, true, true};
-    private static final int[] HITS = new int[6];
+    private static final boolean[] ON = DEFAULTS.clone();
+    private static final int[] HITS = new int[7];
     private static volatile boolean loaded;
     /** why the most recent ad was hidden (shown in the menu so false positives are easy to spot) */
     static volatile String lastAdReason = "-";
@@ -45,6 +46,8 @@ public final class Hooks {
     public static boolean dm() { return flag(1); }
     public static boolean typing() { return flag(2); }
     public static boolean ads() { return flag(3); }
+    /** Employee mode: the pinned employee gate returns true while this is on (off by default). */
+    public static boolean devopt() { return flag(6); }
 
     private static boolean flag(int i) {
         try {
@@ -101,7 +104,7 @@ public final class Hooks {
             }
             SharedPreferences sp = prefs(c);
             for (int i = 0; i < KEYS.length; i++) {
-                ON[i] = sp.getBoolean("on_" + KEYS[i], true);
+                ON[i] = sp.getBoolean("on_" + KEYS[i], DEFAULTS[i]);
                 HITS[i] = sp.getInt("hits_" + KEYS[i], 0);
             }
             loaded = true;

@@ -18,6 +18,7 @@ PATCH = Patch(
             description="Redirect ad-delivery endpoints (story ad injection, ads GraphQL) to a dead path",
             action="rewrite",
             strings=("feed/injected_reels_media/", "ads/graphql/"),
+            max_instructions=1200,  # skips LX/0003;->A00(I)String, a 5000-instruction name table
         ),
         Rule(
             id="reels_ad_insertion_gap",

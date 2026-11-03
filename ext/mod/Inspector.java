@@ -161,6 +161,11 @@ final class Inspector {
             sb.append("\n== first visible Media: urls ==\n");
             List<String> all = Scan.urls(firstMedia);
             for (String u : all) sb.append(u.length() > 160 ? u.substring(0, 160) + "..." : u).append('\n');
+            sb.append("\n== where the links come from (per Media field; > ").append(Scan.MAX_LINKS_PER_FIELD).append(" = ignored as shared cache) ==\n");
+            for (java.util.Map.Entry<String, List<String>> e : Scan.urlsByField(firstMedia).entrySet()) {
+                sb.append("  ").append(e.getKey()).append(": ").append(e.getValue().size()).append(" links")
+                        .append(Scan.ignored(e.getKey(), e.getValue()) ? "  (IGNORED)" : "").append('\n');
+            }
             sb.append("\n== download candidates (video expected), best first ==\n");
             for (String u : Scan.candidates(all, true)) {
                 sb.append(Scan.describe(u)).append("  ").append(u.length() > 110 ? u.substring(0, 110) + "..." : u).append('\n');

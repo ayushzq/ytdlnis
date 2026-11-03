@@ -48,12 +48,13 @@ class Rule:
     max_params: int | None = None
     inject: tuple[str, ...] = ()   # smali lines (no indent) inserted at method start
     require: tuple[str, ...] = ()  # substrings that must ALL appear in the method body (version pin)
+    target: tuple[str, str] | None = None  # (smali class, exact method signature): pin one known method
     feature: str = ""  # runtime toggle in the mod menu: story | dm | typing | ads ("" = always on)
 
     def __post_init__(self) -> None:
         if self.action not in ACTIONS:
             raise ValueError(f"rule {self.id}: bad action {self.action!r}")
-        if not (self.strings or self.string_regex or self.field_regex):
+        if not (self.strings or self.string_regex or self.field_regex or self.target):
             raise ValueError(f"rule {self.id}: no match criteria")
         if self.action == "true" and self.return_types != ("Z",):
             raise ValueError(f"rule {self.id}: action 'true' needs return_types=('Z',)")
@@ -66,7 +67,8 @@ class Rule:
 
     @property
     def needles(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(self.strings + self.prefilter))
+        extra = (self.target[0],) if self.target else ()
+        return tuple(dict.fromkeys(self.strings + self.prefilter + extra))
 
     def string_matches(self, s: str) -> bool:
         if any(n in s for n in self.strings):
@@ -97,7 +99,12 @@ class Rule:
             return None
         if self.action != "rewrite" and any(mk in line for line in f.body(m) for mk in self.markers):
             return None  # already patched
-        reason = self._reason(f, m)
+        if self.target:
+            if f.class_name != self.target[0] or m.signature != self.target[1]:
+                return None
+            reason = f"pinned {self.target[0]}->{self.target[1]}"
+        else:
+            reason = self._reason(f, m)
         if reason is None:
             return None
         if self.max_params is not None and count_params(m.params) > self.max_params:

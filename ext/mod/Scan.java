@@ -82,12 +82,22 @@ final class Scan {
     }
 
     /** Children worth walking: field values (and a few elements of collections / maps / arrays). */
+    /** Objects that hold unrelated data (other posts, user caches, native trees): never walked when pruning. */
+    private static boolean pruned(Object o, Object root) {
+        String n = o.getClass().getName();
+        return (o != root && MEDIA.equals(n)) || n.startsWith("com.instagram.user.") || n.contains("LiveTreeJNI");
+    }
+
     private static void expand(Object o, List<Object> out) {
+        expand(o, out, null);
+    }
+
+    private static void expand(Object o, List<Object> out, Object pruneRoot) {
         try {
             if (o instanceof Iterable) {
                 int n = 0;
                 for (Object e : (Iterable<?>) o) {
-                    if (e != null && !bad(e)) out.add(e);
+                    if (e != null && !bad(e) && (pruneRoot == null || !pruned(e, pruneRoot))) out.add(e);
                     if (++n >= 8) break;
                 }
                 return;
@@ -95,20 +105,23 @@ final class Scan {
             if (o instanceof Map) {
                 int n = 0;
                 for (Object e : ((Map<?, ?>) o).values()) {
-                    if (e != null && !bad(e)) out.add(e);
+                    if (e != null && !bad(e) && (pruneRoot == null || !pruned(e, pruneRoot))) out.add(e);
                     if (++n >= 8) break;
                 }
                 return;
             }
             if (o instanceof Object[]) {
                 Object[] a = (Object[]) o;
-                for (int i = 0; i < a.length && i < 8; i++) if (a[i] != null && !bad(a[i])) out.add(a[i]);
+                for (int i = 0; i < a.length && i < 8; i++) {
+                    if (a[i] != null && !bad(a[i]) && (pruneRoot == null || !pruned(a[i], pruneRoot))) out.add(a[i]);
+                }
                 return;
             }
             if (skipClass(o.getClass().getName())) return;
             for (Field f : fieldsOf(o.getClass())) {
                 Object v = f.get(o);
-                if (v != null && !(v instanceof String) && !(v instanceof Number) && !(v instanceof Boolean) && !bad(v)) {
+                if (v != null && !(v instanceof String) && !(v instanceof Number) && !(v instanceof Boolean) && !bad(v)
+                        && (pruneRoot == null || !pruned(v, pruneRoot))) {
                     out.add(v);
                 }
             }
@@ -122,6 +135,10 @@ final class Scan {
     }
 
     static void walk(Object start, int maxDepth, int maxNodes, Visitor visitor) {
+        walk(start, maxDepth, maxNodes, visitor, null);
+    }
+
+    static void walk(Object start, int maxDepth, int maxNodes, Visitor visitor, Object pruneRoot) {
         if (start == null) return;
         IdentityHashMap<Object, Boolean> seen = new IdentityHashMap<>();
         ArrayDeque<Object> q = new ArrayDeque<>();
@@ -137,13 +154,44 @@ final class Scan {
             if (visitor.visit(o, depth)) return;
             if (depth >= maxDepth) continue;
             kids.clear();
-            expand(o, kids);
+            expand(o, kids, pruneRoot);
             for (Object k : kids) {
                 if (seen.put(k, Boolean.TRUE) == null) {
                     q.add(k);
                     d.add(depth + 1);
                 }
             }
+        }
+    }
+
+    static Object findByClass(Object start, final String cls, int maxDepth, int maxNodes) {
+        final Object[] res = new Object[1];
+        walk(start, maxDepth, maxNodes, new Visitor() {
+            @Override
+            public boolean visit(Object o, int depth) {
+                if (cls.equals(o.getClass().getName())) {
+                    res[0] = o;
+                    return true;
+                }
+                return false;
+            }
+        });
+        return res[0];
+    }
+
+    /**
+     * Reels items (build 455: X.02lY) carry the "sponsored" boolean in field A19; the ad-gap code reads it
+     * to find the previous sponsored item. Pinned names; returns null when absent or false.
+     */
+    static String sponsoredFlag(Object start) {
+        try {
+            Object item = findByClass(start, "X.02lY", 4, 800);
+            if (item == null) return null;
+            java.lang.reflect.Field f = item.getClass().getDeclaredField("A19");
+            f.setAccessible(true);
+            return f.getBoolean(item) ? "X.02lY.A19=true" : null;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -274,12 +322,23 @@ final class Scan {
         return out;
     }
 
-    /** CDN urls reachable from a Media object, in discovery order. */
-    static List<String> urls(Object media) {
+    /** A subtree that yields more links than this is a shared cache / unrelated list, not this post's media. */
+    static final int MAX_LINKS_PER_FIELD = 14;
+    static final int MAX_LIST = 12;
+
+    static boolean ignored(String key, List<String> links) {
+        return key.contains(" [list of ") || links.size() > MAX_LINKS_PER_FIELD;
+    }
+
+    private static List<String> urlsIn(Object start, final Object root, int depth, int nodes) {
         final List<String> out = new ArrayList<>();
-        walk(media, 6, 3000, new Visitor() {
+        if (start instanceof String) {
+            addUrl(out, (String) start);
+            return out;
+        }
+        walk(start, depth, nodes, new Visitor() {
             @Override
-            public boolean visit(Object o, int depth) {
+            public boolean visit(Object o, int d) {
                 try {
                     if (skipClass(o.getClass().getName())) return false;
                     for (Field f : fieldsOf(o.getClass())) {
@@ -297,7 +356,39 @@ final class Scan {
                 }
                 return false;
             }
-        });
+        }, root);
+        return out;
+    }
+
+    /** Links per top-level field of the Media object; fields that are too big are listed but flagged. */
+    static java.util.Map<String, List<String>> urlsByField(Object media) {
+        java.util.Map<String, List<String>> res = new java.util.LinkedHashMap<>();
+        if (media == null) return res;
+        for (Field f : fieldsOf(media.getClass())) {
+            try {
+                Object v = f.get(media);
+                if (v == null) continue;
+                List<String> sub = urlsIn(v, media, 4, 500);
+                if (sub.isEmpty()) continue;
+                // a long list (e.g. 31 profile photos) is never "this post's versions"
+                String key = f.getName();
+                if (v instanceof java.util.Collection && ((java.util.Collection<?>) v).size() > MAX_LIST) {
+                    key += " [list of " + ((java.util.Collection<?>) v).size() + "]";
+                }
+                res.put(key, sub);
+            } catch (Throwable ignored) {
+            }
+        }
+        return res;
+    }
+
+    /** CDN urls that belong to this media (fields that pull in shared caches / other posts are ignored). */
+    static List<String> urls(Object media) {
+        List<String> out = new ArrayList<>();
+        for (java.util.Map.Entry<String, List<String>> e : urlsByField(media).entrySet()) {
+            if (ignored(e.getKey(), e.getValue())) continue;
+            for (String u : e.getValue()) if (!out.contains(u)) out.add(u);
+        }
         return out;
     }
 

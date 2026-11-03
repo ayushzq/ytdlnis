@@ -111,11 +111,44 @@ class PatchTests(unittest.TestCase):
             texts = {p.name: p.read_text() for p in root.rglob("*.smali")}
             return res, texts
 
-    def test_developer_options_forces_true(self):
-        res, texts = self.run_patch("developer_options")
-        self.assertEqual(res.patched, 1)
-        self.assertIn("const/4 v0, 0x1", texts["Dev.smali"])
-        self.assertIn('const-string v0, "is_employee"', texts["Dev.smali"])  # String getter untouched
+    def test_employee_gate_is_pinned(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            f = root / "smali_classes2/com/ig/Gate.smali"
+            f.write_text(".class public final LX/02ss;\n.super Ljava/lang/Object;\n\n"
+                         ".method public static A00(Lcom/instagram/common/session/UserSession;)Z\n    .locals 1\n"
+                         "    const/4 v0, 0x0\n    return v0\n.end method\n\n"
+                         ".method public static A01(Lcom/instagram/common/session/UserSession;)Z\n    .locals 1\n"
+                         "    const/4 v0, 0x0\n    return v0\n.end method\n")
+            patch = REGISTRY["developer_options"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            res = patch.apply(root, cands, Options())
+            self.assertEqual(res.patched, 1)  # only A00, not the look-alike A01
+            text = f.read_text()
+            self.assertIn("invoke-static {}, Lmod/Hooks;->devopt()Z", text)
+            self.assertEqual(text.count("ghost-guard"), 1)
+            # static mode: plain return true
+            f.write_text(".class public final LX/02ss;\n.super Ljava/lang/Object;\n\n"
+                         ".method public static A00(Lcom/instagram/common/session/UserSession;)Z\n    .locals 1\n"
+                         "    const/4 v0, 0x0\n    return v0\n.end method\n")
+            patch.apply(root, cands, Options(use_ext=False))
+            self.assertIn("const/4 v0, 0x1", f.read_text())
+
+    def test_ad_endpoint_skips_giant_tables(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_tree(Path(t))
+            f = root / "smali_classes2/com/ig/Table.smali"
+            body = "".join(f"    const/4 v1, 0x{i % 15:x}\n" for i in range(1300))
+            f.write_text(".class public LX/0003;\n.super Ljava/lang/Object;\n\n"
+                         ".method public static A00(I)Ljava/lang/String;\n    .locals 2\n"
+                         '    const-string v0, "feed/injected_reels_media/"\n' + body + "    return-object v0\n.end method\n")
+            patch = REGISTRY["block_ads"]
+            cands = find_candidates(root, {"p": patch.needles})["p"]
+            res = patch.apply(root, cands, Options())
+            rule = [r for r in res.rules if r.rule_id == "ad_endpoints"][0]
+            self.assertEqual(len(rule.hits), 0)
+            self.assertTrue(any("too large" in h.reason for h in rule.skipped))
+            self.assertNotIn("Lmod/Hooks", f.read_text())
 
     def test_ghost_rewrites_and_stubs(self):
         res, texts = self.run_patch("ghost_mode")
@@ -214,7 +247,7 @@ class PatchTests(unittest.TestCase):
             {"rule_id": "dm_seen_endpoint", "status": "applied", "hits": [{}, {}, {}]},
             {"rule_id": "typing_send_stub", "status": "no-match", "hits": []}]}]
         java = build(report, "t1")
-        self.assertIn("HOOKS = {1, 3, 0, 0}", java)
+        self.assertIn("HOOKS = {1, 3, 0, 0, -1, -1, 0}", java)
         self.assertIn("ghost_mode/story_seen_endpoint: applied (1)", java)
 
     def test_fixzip_adds_next_dex(self):
